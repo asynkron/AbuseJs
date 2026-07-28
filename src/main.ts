@@ -29,7 +29,11 @@ function say(message: string): void {
 /* ------------------------------------------------------------------ */
 
 const PICTURE_KEY = 'abusejs.picture'
-const PICTURE_DEFAULTS = { brightness: 1, contrast: 1 }
+/**
+ * Not 1.0/1.0: the CRT pass's additive ghosting and bloom wash the image out,
+ * and this is the trim that reads best against Abuse's dark art.
+ */
+const PICTURE_DEFAULTS = { brightness: 1.2, contrast: 1.2 }
 
 function loadPictureSettings(): { brightness: number; contrast: number } {
   try {

@@ -164,8 +164,8 @@ export class CrtFilter extends Filter {
       uPixelScale: { value: options.pixelScale ?? 2, type: 'f32' },
       uIntensity: { value: options.intensity ?? 1, type: 'f32' },
       uScreenSize: { value: new Float32Array([960, 540]), type: 'vec2<f32>' },
-      uBrightness: { value: options.brightness ?? 1, type: 'f32' },
-      uContrast: { value: options.contrast ?? 1, type: 'f32' },
+      uBrightness: { value: options.brightness ?? 1.2, type: 'f32' },
+      uContrast: { value: options.contrast ?? 1.2, type: 'f32' },
     })
 
     super({
