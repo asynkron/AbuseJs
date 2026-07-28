@@ -1,0 +1,320 @@
+/**
+ * A deliberately tiny reader for the Abuse Lisp data files.
+ *
+ * We do not run these scripts - we only mine two things out of them:
+ *   - the `(load_tiles ...)` call in lisp/startup.lsp, which lists every
+ *     tile .spe file the game loads
+ *   - every `(def_char NAME ... (states "file.spe" (state frames...)))` block,
+ *     which is where all animation frame ordering lives
+ *
+ * Inside a `states` block only four shapes occur across the whole dataset,
+ * defined in lisp/userfuns.lsp:
+ *   "name"              a single frame
+ *   (seq "4wlk" 1 10)   "4wlk0001.pcx" .. "4wlk0010.pcx", descending allowed
+ *   (rep "x.pcx" 4)     that frame four times
+ *   (app a b ...)       concatenation
+ */
+
+export type Sexp = string | number | LispSymbol | Sexp[]
+
+export class LispSymbol {
+  constructor(readonly name: string) {}
+  toString() {
+    return this.name
+  }
+}
+
+export function isSymbol(x: Sexp, name?: string): x is LispSymbol {
+  return x instanceof LispSymbol && (name === undefined || x.name === name)
+}
+
+/** Parses a whole file into a list of top-level forms. */
+export function readForms(source: string): Sexp[] {
+  const forms: Sexp[] = []
+  let p = 0
+
+  function skipTrivia() {
+    for (;;) {
+      while (p < source.length && /\s/.test(source[p])) p++
+      if (source[p] === ';') {
+        while (p < source.length && source[p] !== '\n') p++
+        continue
+      }
+      return
+    }
+  }
+
+  function readAtom(): Sexp {
+    const start = p
+    while (p < source.length && !/[\s()'"`;]/.test(source[p])) p++
+    const text = source.slice(start, p)
+    if (text.length === 0) {
+      // A stray delimiter we do not model (e.g. ` or #). Consume and skip it.
+      p++
+      return new LispSymbol('')
+    }
+    if (/^[-+]?\d+$/.test(text)) return parseInt(text, 10)
+    if (/^[-+]?\d*\.\d+$/.test(text)) return parseFloat(text)
+    return new LispSymbol(text)
+  }
+
+  function readString(): string {
+    p++ // opening quote
+    let out = ''
+    while (p < source.length && source[p] !== '"') {
+      if (source[p] === '\\' && p + 1 < source.length) {
+        p++
+        out += source[p] === 'n' ? '\n' : source[p]
+      } else {
+        out += source[p]
+      }
+      p++
+    }
+    p++ // closing quote
+    return out
+  }
+
+  function readForm(): Sexp {
+    skipTrivia()
+    const c = source[p]
+    if (c === '(') {
+      p++
+      const list: Sexp[] = []
+      for (;;) {
+        skipTrivia()
+        if (p >= source.length) break
+        if (source[p] === ')') {
+          p++
+          break
+        }
+        list.push(readForm())
+      }
+      return list
+    }
+    if (c === ')') {
+      // Unbalanced close - skip it rather than derailing the whole file.
+      p++
+      return new LispSymbol('')
+    }
+    if (c === '"') return readString()
+    if (c === "'") {
+      p++
+      return readForm()
+    }
+    return readAtom()
+  }
+
+  for (;;) {
+    skipTrivia()
+    if (p >= source.length) break
+    forms.push(readForm())
+  }
+
+  return forms
+}
+
+/** Depth-first walk over every list form in a parsed file. */
+export function* walk(forms: Sexp[]): Generator<Sexp[]> {
+  const stack: Sexp[] = [...forms]
+  while (stack.length) {
+    const node = stack.pop()!
+    if (Array.isArray(node)) {
+      yield node
+      for (const child of node) stack.push(child)
+    }
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* frame sequences                                                     */
+/* ------------------------------------------------------------------ */
+
+function digstr(n: number, width: number): string {
+  return String(n).padStart(width, '0')
+}
+
+/** Expands one state's value into the ordered list of .spe entry names. */
+export function expandFrames(form: Sexp): string[] {
+  if (typeof form === 'string') return [form]
+  if (!Array.isArray(form) || form.length === 0) return []
+
+  const head = form[0]
+  if (!isSymbol(head)) {
+    // A bare list of frame names.
+    return form.flatMap(expandFrames)
+  }
+
+  switch (head.name) {
+    case 'seq': {
+      const name = form[1]
+      const first = form[2]
+      const last = form[3]
+      if (typeof name !== 'string' || typeof first !== 'number' || typeof last !== 'number') {
+        return []
+      }
+      const out: string[] = []
+      const step = first <= last ? 1 : -1
+      for (let i = first; step > 0 ? i <= last : i >= last; i += step) {
+        out.push(`${name}${digstr(i, 4)}.pcx`)
+      }
+      return out
+    }
+    case 'rep': {
+      const name = form[1]
+      const count = form[2]
+      if (typeof name !== 'string' || typeof count !== 'number') return []
+      return new Array(Math.max(0, count)).fill(name)
+    }
+    case 'app':
+      return form.slice(1).flatMap(expandFrames)
+    default:
+      return []
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* extraction                                                          */
+/* ------------------------------------------------------------------ */
+
+export interface CharacterDef {
+  name: string
+  /** The .spe file all of this character's frames live in. */
+  file: string
+  states: Record<string, string[]>
+  /** Bounding box half-extents from `(range ...)`, when present. */
+  range?: [number, number]
+}
+
+/** Pulls every `def_char` with a usable `states` block out of parsed forms. */
+export function extractCharacters(forms: Sexp[]): CharacterDef[] {
+  const out: CharacterDef[] = []
+
+  for (const form of walk(forms)) {
+    if (!isSymbol(form[0], 'def_char')) continue
+    const nameNode = form[1]
+    if (!isSymbol(nameNode)) continue
+
+    let statesForm: Sexp[] | undefined
+    let range: [number, number] | undefined
+
+    for (const clause of form.slice(2)) {
+      if (!Array.isArray(clause)) continue
+      if (isSymbol(clause[0], 'states')) statesForm = clause
+      else if (isSymbol(clause[0], 'range') && typeof clause[1] === 'number' && typeof clause[2] === 'number') {
+        range = [clause[1], clause[2]]
+      }
+    }
+
+    if (!statesForm || typeof statesForm[1] !== 'string') continue
+
+    const states: Record<string, string[]> = {}
+    for (const stateClause of statesForm.slice(2)) {
+      if (!Array.isArray(stateClause)) continue
+      const stateName = stateClause[0]
+      if (!isSymbol(stateName)) continue
+      const frames = stateClause.slice(1).flatMap(expandFrames)
+      if (frames.length) states[stateName.name] = frames
+    }
+
+    if (Object.keys(states).length === 0) continue
+    out.push({ name: nameNode.name, file: statesForm[1], states, range })
+  }
+
+  return out
+}
+
+/* ------------------------------------------------------------------ */
+/* template expansion                                                  */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Some characters are not written out literally. people.lsp defines helpers
+ * like
+ *
+ *   (defun make_top_char (symbol base ufun dfun)
+ *     (eval (list 'def_char symbol ... `(states "art/coptop.spe"
+ *                                               (stopped (seq ,base 1 24))))))
+ *   (make_top_char 'MGUN_TOP "4gma" 'laser_ufun 'top_draw)
+ *
+ * and the cop's aiming torso - the whole upper half of the player - only
+ * exists through one of those calls. We expand any `defun` whose body wraps a
+ * single `def_char` by substituting its parameters into the template, which
+ * covers these without needing a real evaluator.
+ */
+function findDefCharTemplate(body: Sexp[]): Sexp[] | undefined {
+  for (const node of walk(body)) {
+    // Written directly, usually inside a backquote.
+    if (isSymbol(node[0], 'def_char')) return node
+    // Or assembled with (list 'def_char name clause...).
+    if (isSymbol(node[0], 'list') && isSymbol(node[1], 'def_char')) return node.slice(1)
+  }
+  return undefined
+}
+
+function substitute(form: Sexp, bindings: Map<string, Sexp>): Sexp {
+  if (Array.isArray(form)) return form.map((f) => substitute(f, bindings))
+  if (form instanceof LispSymbol) {
+    // Templates reference parameters both as `,name` (inside a backquote) and
+    // occasionally as a bare `name`.
+    const key = form.name.startsWith(',') ? form.name.slice(1) : form.name
+    const bound = bindings.get(key)
+    if (bound !== undefined) return bound
+  }
+  return form
+}
+
+function isLiteralArg(arg: Sexp): boolean {
+  return typeof arg === 'string' || typeof arg === 'number' || arg instanceof LispSymbol
+}
+
+export function expandCharacterTemplates(forms: Sexp[]): CharacterDef[] {
+  const templates = new Map<string, { params: string[]; template: Sexp[] }>()
+
+  for (const form of walk(forms)) {
+    if (!isSymbol(form[0], 'defun')) continue
+    const name = form[1]
+    const params = form[2]
+    if (!isSymbol(name) || !Array.isArray(params)) continue
+
+    const template = findDefCharTemplate(form.slice(3))
+    if (!template) continue
+
+    templates.set(name.name, {
+      // Note the arrow: passing `isSymbol` directly would feed the array index
+      // into its optional `name` parameter and match nothing.
+      params: params.filter((p): p is LispSymbol => isSymbol(p)).map((p) => p.name),
+      template,
+    })
+  }
+
+  if (templates.size === 0) return []
+
+  const out: CharacterDef[] = []
+  for (const form of walk(forms)) {
+    const head = form[0]
+    if (!isSymbol(head)) continue
+    const template = templates.get(head.name)
+    if (!template) continue
+
+    const args = form.slice(1)
+    if (args.length < template.params.length || !args.every(isLiteralArg)) continue
+
+    const bindings = new Map<string, Sexp>()
+    template.params.forEach((param, i) => bindings.set(param, args[i]))
+
+    const expanded = substitute(template.template, bindings)
+    out.push(...extractCharacters([expanded]))
+  }
+
+  return out
+}
+
+/** Returns the ordered `.spe` paths from the `(load_tiles ...)` call. */
+export function extractTileFiles(forms: Sexp[]): string[] {
+  for (const form of walk(forms)) {
+    if (isSymbol(form[0], 'load_tiles')) {
+      return form.slice(1).filter((x): x is string => typeof x === 'string')
+    }
+  }
+  return []
+}

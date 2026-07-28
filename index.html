@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
+    <title>abuse.js</title>
+    <style>
+      html, body {
+        margin: 0;
+        padding: 0;
+        height: 100%;
+        background: #000;
+        overflow: hidden;
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        color: #9aa;
+      }
+      #stage { display: block; }
+      #boot {
+        position: fixed;
+        inset: 0;
+        display: grid;
+        place-content: center;
+        gap: 0.5rem;
+        text-align: center;
+        font-size: 13px;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        pointer-events: none;
+        transition: opacity 250ms ease;
+      }
+      #boot.hidden { opacity: 0; }
+      #hud {
+        position: fixed;
+        z-index: 10;
+        left: 10px;
+        bottom: 8px;
+        font-size: 11px;
+        color: #6f7f8f;
+        white-space: pre;
+        pointer-events: none;
+        text-shadow: 0 1px 0 #000;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="boot">loading&hellip;</div>
+    <div id="hud"></div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
