@@ -361,6 +361,98 @@ export function expandCharacterTemplates(forms: Sexp[]): CharacterDef[] {
   return out
 }
 
+/* ------------------------------------------------------------------ */
+/* sound effects                                                       */
+/* ------------------------------------------------------------------ */
+
+export interface SoundTable {
+  /** Symbol name -> wav path relative to the data root. */
+  named: Record<string, string>
+  /** Named arrays such as AMB_SOUNDS and A_SCREAMS, resolved to paths. */
+  arrays: Record<string, (string | null)[]>
+}
+
+/**
+ * Resolves lisp/sfx.lsp into a plain lookup table.
+ *
+ * Sounds are declared as `(def_sound 'SYM (sfxdir "file.wav"))`, aliased with
+ * `setq`, and collected into arrays like AMB_SOUNDS whose entries mix fresh
+ * anonymous `def_sound` calls with references to earlier symbols and
+ * `(aref OTHER_ARRAY n)`. Forms are processed in file order, which is enough
+ * for every reference in the shipped scripts to already be defined.
+ */
+export function extractSounds(forms: Sexp[]): SoundTable {
+  const named: Record<string, string> = {}
+  const arrays: Record<string, (string | null)[]> = {}
+
+  /** `(sfxdir "x.wav")` -> "sfx/x.wav"; a bare string passes through. */
+  const path = (node: Sexp): string | null => {
+    if (typeof node === 'string') return node
+    if (Array.isArray(node) && isSymbol(node[0], 'sfxdir') && typeof node[1] === 'string') {
+      return `sfx/${node[1]}`
+    }
+    return null
+  }
+
+  const resolve = (node: Sexp): string | null => {
+    if (node instanceof LispSymbol) return named[node.name] ?? null
+    if (!Array.isArray(node)) return path(node)
+
+    if (isSymbol(node[0], 'def_sound')) {
+      // Either (def_sound 'SYM <path>) or the anonymous (def_sound <path>).
+      if (node.length >= 3 && isSymbol(node[1])) {
+        const file = path(node[2])
+        if (file) named[node[1].name] = file
+        return file
+      }
+      return path(node[1])
+    }
+
+    if (isSymbol(node[0], 'aref') && isSymbol(node[1]) && typeof node[2] === 'number') {
+      return arrays[node[1].name]?.[node[2]] ?? null
+    }
+
+    return null
+  }
+
+  // Strictly in file order: a reference like SPACE_SND inside AMB_SOUNDS only
+  // resolves because its def_sound came earlier in the file. `walk` pops from
+  // a stack and would visit them out of order.
+  const visit = (node: Sexp): void => {
+    if (!Array.isArray(node)) return
+
+    if (isSymbol(node[0], 'def_sound')) {
+      resolve(node)
+      return
+    }
+
+    if (isSymbol(node[0], 'setq') && isSymbol(node[1])) {
+      const target = node[1].name
+      const value = node[2]
+
+      // (setq NAME (make-array N :initial-contents (list ...)))
+      if (Array.isArray(value) && isSymbol(value[0], 'make-array')) {
+        const list = value.find((v) => Array.isArray(v) && isSymbol(v[0], 'list')) as
+          | Sexp[]
+          | undefined
+        if (list) arrays[target] = list.slice(1).map(resolve)
+        return
+      }
+
+      // (setq ALIAS OTHER_SND)
+      const aliased = resolve(value)
+      if (aliased) named[target] = aliased
+      return
+    }
+
+    for (const child of node) visit(child)
+  }
+
+  for (const form of forms) visit(form)
+
+  return { named, arrays }
+}
+
 /** Returns the ordered `.spe` paths from the `(load_tiles ...)` call. */
 export function extractTileFiles(forms: Sexp[]): string[] {
   for (const form of walk(forms)) {

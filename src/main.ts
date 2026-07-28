@@ -1,6 +1,7 @@
 import { Application } from 'pixi.js'
 
 import { GameAssets } from './assets/loader'
+import { AudioBank, type SoundManifest } from './audio/AudioBank'
 import { GameLoop } from './core/loop'
 import { Input } from './core/input'
 import { Level } from './game/Level'
@@ -126,11 +127,18 @@ async function start() {
   say(`loading ${levelId}`)
   const level = new Level(await assets.loadLevel(levelId), assets)
 
+  const soundManifest = (await fetch('assets/sounds.json').then((r) => r.json())) as SoundManifest
+  const audio = new AudioBank(soundManifest)
+  // Browsers will not start an AudioContext without a gesture.
+  const unlockAudio = () => audio.unlock()
+  window.addEventListener('keydown', unlockAudio)
+  window.addEventListener('pointerdown', unlockAudio)
+
   let zoom = integerZoom(app.renderer.screen.width, app.renderer.screen.height)
   let viewWidth = Math.ceil(app.renderer.screen.width / zoom)
   let viewHeight = Math.ceil(app.renderer.screen.height / zoom)
 
-  const world = new World(assets, level, viewWidth, viewHeight)
+  const world = new World(assets, level, viewWidth, viewHeight, audio)
   world.root.scale.set(zoom)
   // The light overlay multiplies over the finished scene, so it sits on top of
   // the world but still inside the stage, and therefore under the CRT pass.
@@ -201,7 +209,9 @@ async function start() {
             `${world.player.onGround ? '' : ' (air)'}  x${zoom}  ${fps}fps  ${world.spriteCount} sprites` +
             `  ${world.lights.visibleCount}/${level.lighting.lights.length} lights` +
             ` @ambient ${level.lighting.minLight}/63`,
-          `props ${world.propCounts.visible}/${world.propCounts.total} drawn   ${world.objectSummary}`,
+          `props ${world.propCounts.visible}/${world.propCounts.total} drawn` +
+            `   audio ${audio.ready ? `${audio.loadedCount} clips, ${world.ambientCount} emitters` : 'press a key'}`,
+          world.objectSummary,
           `arrows/WASD move   space jump   shift run` +
             `   V crt:${crtEnabled ? 'on' : 'off'}   L light:${world.lights.enabled ? 'on' : 'off'}`,
         ].join('\n')

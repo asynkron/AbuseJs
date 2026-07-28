@@ -58,6 +58,14 @@ export interface LevelObjectData {
   hp: number
   aistate: number
   aitype: number
+  /**
+   * Level objects reuse the velocity slots as configuration - AMBIENT_SOUND
+   * keeps its repeat delay in `xvel`, volume in `yvel`, random spread in
+   * `xacel`.
+   */
+  xvel: number
+  yvel: number
+  xacel: number
 }
 
 export interface LightSource {

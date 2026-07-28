@@ -1,6 +1,8 @@
 import { Container, type Renderer } from 'pixi.js'
 
 import type { GameAssets } from '../assets/loader'
+import type { AudioBank } from '../audio/AudioBank'
+import { AmbientSounds } from '../audio/AmbientSounds'
 import { Camera } from '../core/camera'
 import type { Input } from '../core/input'
 import { TICK_HZ } from '../core/loop'
@@ -43,11 +45,15 @@ export class World {
   readonly camera: Camera
   readonly player: Player
 
+  /** Level ambience, driven from the camera position. */
+  private readonly ambience: AmbientSounds
+
   constructor(
     assets: GameAssets,
     readonly level: Level,
     viewWidth: number,
     viewHeight: number,
+    private readonly audio: AudioBank,
   ) {
     this.bgTiles = new TileLayer(assets, level, 'back')
     this.fgTiles = new TileLayer(assets, level, 'fore', false)
@@ -64,6 +70,8 @@ export class World {
 
     this.props = spawnProps(assets, level.objects)
     for (const prop of this.props) this.propLayer.addChild(prop.sprite)
+
+    this.ambience = new AmbientSounds(audio, level.objects)
 
     this.camera = new Camera(viewWidth, viewHeight)
 
@@ -100,6 +108,10 @@ export class World {
       width: this.level.widthPx,
       height: this.level.heightPx,
     })
+
+    // The player is the listener, not the camera - the camera lags behind.
+    this.audio.setListener(this.player.x, this.player.y)
+    this.ambience.update(this.player.x, this.player.y)
   }
 
   render(alpha: number, renderer: Renderer): void {
@@ -171,6 +183,10 @@ export class World {
 
   get propCounts(): { visible: number; total: number } {
     return { visible: this.visibleProps, total: this.props.length }
+  }
+
+  get ambientCount(): number {
+    return this.ambience.count
   }
 
   /**

@@ -33,10 +33,12 @@ import {
   extractCharacters,
   expandCharacterTemplates,
   extractEditorOnlyDrawFuns,
+  extractSounds,
   isSymbol,
   walk,
   type CharacterDef,
   type Sexp,
+  type SoundTable,
 } from './lisp.js'
 import { packGrid, packShelves, writePage, type PackInput } from './atlas.js'
 
@@ -135,6 +137,7 @@ interface LispScan {
   characters: CharacterDef[]
   /** Draw functions that only run in the level editor. */
   editorOnlyDrawFuns: Set<string>
+  sounds: SoundTable
 }
 
 async function scanLisp(): Promise<LispScan> {
@@ -150,6 +153,7 @@ async function scanLisp(): Promise<LispScan> {
   const characters = new Map<string, CharacterDef>()
   // `dev_draw` is a built-in; the rest are found by shape in the scripts.
   const editorOnlyDrawFuns = new Set<string>(['dev_draw'])
+  let sounds: SoundTable = { named: {}, arrays: {} }
 
   for (const file of files) {
     let forms: Sexp[]
@@ -168,9 +172,15 @@ async function scanLisp(): Promise<LispScan> {
     for (const c of extractCharacters(forms)) characters.set(c.name, c)
     for (const c of expandCharacterTemplates(forms)) characters.set(c.name, c)
     for (const fn of extractEditorOnlyDrawFuns(forms)) editorOnlyDrawFuns.add(fn)
+
+    // The sound table is self-contained and order-sensitive, so resolve it
+    // from its own file rather than accumulating across the whole tree.
+    // Match the exact path: addon/twist ships its own lisp/sfx.lsp and, being
+    // sorted after the core scripts, would otherwise clobber this.
+    if (assetId(file) === 'lisp/sfx.lsp') sounds = extractSounds(forms)
   }
 
-  return { tileFiles, characters: [...characters.values()], editorOnlyDrawFuns }
+  return { tileFiles, characters: [...characters.values()], editorOnlyDrawFuns, sounds }
 }
 
 /* ------------------------------------------------------------------ */
@@ -458,7 +468,26 @@ async function convertSprites(
 /* levels                                                              */
 /* ------------------------------------------------------------------ */
 
-const OBJECT_FIELDS = ['x', 'y', 'direction', 'hp', 'aistate', 'aitype', 'flags', 'active'] as const
+/**
+ * Per-object fields worth carrying over. The velocity slots are not physics
+ * here: level objects reuse them as configuration - AMBIENT_SOUND keeps its
+ * repeat delay in `xvel`, its volume in `yvel` and its random spread in
+ * `xacel` (lisp/sfx.lsp, ambs_cons).
+ */
+const OBJECT_FIELDS = [
+  'x',
+  'y',
+  'direction',
+  'hp',
+  'aistate',
+  'aitype',
+  'flags',
+  'active',
+  'xvel',
+  'yvel',
+  'xacel',
+  'yacel',
+] as const
 
 async function convertLevels() {
   const specFiles = await listFiles(SRC, '.spe')
@@ -550,6 +579,9 @@ interface LevelObject {
   hp: number
   aistate: number
   aitype: number
+  xvel: number
+  yvel: number
+  xacel: number
 }
 
 function readObjects(spec: SpecFile, buf: Buffer): LevelObject[] {
@@ -610,6 +642,9 @@ function readObjects(spec: SpecFile, buf: Buffer): LevelObject[] {
       hp: fields.hp?.[i] ?? 0,
       aistate: fields.aistate?.[i] ?? 0,
       aitype: fields.aitype?.[i] ?? 0,
+      xvel: fields.xvel?.[i] ?? 0,
+      yvel: fields.yvel?.[i] ?? 0,
+      xacel: fields.xacel?.[i] ?? 0,
     })
   }
   return out
@@ -660,6 +695,11 @@ async function main() {
 
   console.log('copying sound effects...')
   const sounds = await copySounds()
+  await writeJSON(join(OUT, 'sounds.json'), {
+    named: lisp.sounds.named,
+    ambient: lisp.sounds.arrays.AMB_SOUNDS ?? [],
+    arrays: lisp.sounds.arrays,
+  })
 
   console.log(
     [
@@ -673,7 +713,8 @@ async function main() {
         (sprites.unresolved ? ` (${sprites.unresolved} frame refs unresolved)` : ''),
       `  loose images     : ${sprites.images} (${sprites.standalone} standalone)`,
       `  levels           : ${levels.levels} (${levels.lights} light sources)`,
-      `  sound effects    : ${sounds}`,
+      `  sound effects    : ${sounds} files, ${Object.keys(lisp.sounds.named).length} named` +
+        `, ${(lisp.sounds.arrays.AMB_SOUNDS ?? []).filter(Boolean).length}/17 ambient`,
       `  palette tints    : ${Object.keys(tints).length}`,
     ].join('\n'),
   )
