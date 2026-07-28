@@ -24,6 +24,76 @@ function say(message: string): void {
   boot.textContent = message
 }
 
+/* ------------------------------------------------------------------ */
+/* picture controls                                                    */
+/* ------------------------------------------------------------------ */
+
+const PICTURE_KEY = 'abusejs.picture'
+const PICTURE_DEFAULTS = { brightness: 1, contrast: 1 }
+
+function loadPictureSettings(): { brightness: number; contrast: number } {
+  try {
+    const stored = localStorage.getItem(PICTURE_KEY)
+    if (!stored) return { ...PICTURE_DEFAULTS }
+    const parsed = JSON.parse(stored) as Partial<typeof PICTURE_DEFAULTS>
+    return {
+      brightness: Number(parsed.brightness) || PICTURE_DEFAULTS.brightness,
+      contrast: Number(parsed.contrast) || PICTURE_DEFAULTS.contrast,
+    }
+  } catch {
+    return { ...PICTURE_DEFAULTS }
+  }
+}
+
+/** Wires the top-right brightness/contrast sliders to the CRT pass. */
+function mountPictureControls(crt: CrtFilter): void {
+  const panel = document.getElementById('controls') as HTMLDivElement | null
+  const brightness = document.getElementById('brightness') as HTMLInputElement | null
+  const contrast = document.getElementById('contrast') as HTMLInputElement | null
+  const brightnessVal = document.getElementById('brightness-val')
+  const contrastVal = document.getElementById('contrast-val')
+  const reset = document.getElementById('reset-levels')
+  if (!panel || !brightness || !contrast || !brightnessVal || !contrastVal || !reset) return
+
+  const sync = (persist: boolean) => {
+    crt.brightness = Number(brightness.value)
+    crt.contrast = Number(contrast.value)
+    brightnessVal.textContent = crt.brightness.toFixed(2)
+    contrastVal.textContent = crt.contrast.toFixed(2)
+    if (persist) {
+      try {
+        localStorage.setItem(
+          PICTURE_KEY,
+          JSON.stringify({ brightness: crt.brightness, contrast: crt.contrast }),
+        )
+      } catch {
+        // Private browsing and the like - the sliders still work, just not across reloads.
+      }
+    }
+  }
+
+  brightness.value = String(crt.brightness)
+  contrast.value = String(crt.contrast)
+  sync(false)
+
+  for (const slider of [brightness, contrast]) {
+    slider.addEventListener('input', () => sync(true))
+    // A focused slider would swallow space and the arrow keys, so hand the
+    // keyboard straight back to the game once the drag is over.
+    slider.addEventListener('change', () => slider.blur())
+    slider.addEventListener('pointerup', () => slider.blur())
+  }
+
+  reset.addEventListener('click', () => {
+    brightness.value = String(PICTURE_DEFAULTS.brightness)
+    contrast.value = String(PICTURE_DEFAULTS.contrast)
+    sync(true)
+    reset.blur()
+  })
+
+  panel.hidden = false
+}
+
 function integerZoom(width: number, height: number): number {
   const byWidth = width / MIN_VIEW_WIDTH
   const byHeight = height / MIN_VIEW_HEIGHT
@@ -62,12 +132,18 @@ async function start() {
 
   const input = new Input()
 
-  const crt = new CrtFilter()
+  // The filter stays attached even with the CRT dialled off, so the
+  // brightness/contrast trim still applies to the raw image.
+  const crt = new CrtFilter(loadPictureSettings())
+  app.stage.filters = [crt]
+
   let crtEnabled = true
-  const applyCrt = () => {
-    app.stage.filters = crtEnabled ? [crt] : []
+  const setCrtEnabled = (on: boolean) => {
+    crtEnabled = on
+    crt.intensity = on ? 1 : 0
   }
-  applyCrt()
+
+  mountPictureControls(crt)
 
   // The renderer is the source of truth for size: Pixi's own resizeTo observer
   // can change it without a window resize event ever reaching us.
@@ -92,8 +168,7 @@ async function start() {
 
   window.addEventListener('keydown', (e) => {
     if (e.code !== 'KeyV') return
-    crtEnabled = !crtEnabled
-    applyCrt()
+    setCrtEnabled(!crtEnabled)
   })
 
   let frames = 0

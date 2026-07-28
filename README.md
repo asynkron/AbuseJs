@@ -95,8 +95,11 @@ Two deliberate differences from the original:
   size.
 
 The additive passes (0.24 ghosting + 0.32 bloom) lift the blacks noticeably on Abuse's dark art.
-That is what the original does; `new CrtFilter({ intensity })` blends the whole pass back toward the
-raw image if you want it subtler.
+That is what the original does, so rather than change its constants there are **brightness and
+contrast sliders in the top right** that trim the result. They are applied last and outside the
+intensity mix, so they also correct the raw image with the CRT toggled off, and they persist in
+`localStorage`. Around `0.96 / 1.18` puts the blacks back roughly where they started while keeping
+the phosphor texture. `new CrtFilter({ intensity })` dials the whole pass back instead.
 
 ## Not done yet
 

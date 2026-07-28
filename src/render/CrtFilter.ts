@@ -36,6 +36,8 @@ uniform float uTime;
 uniform float uPixelScale;
 uniform float uIntensity;
 uniform vec2 uScreenSize;
+uniform float uBrightness;
+uniform float uContrast;
 
 // --- constants, in the original's 960x540 present space ---
 const float CURVE          = 9.0;    // px the image is squeezed at the edges
@@ -130,7 +132,17 @@ void main() {
     float tube = length(max(d, 0.0)) + min(max(d.x, d.y), 0.0) - TUBE_RADIUS * px;
     color *= 1.0 - smoothstep(-1.0, 1.0, tube);
 
-    finalColor = vec4(mix(sampleScene(uv), color, uIntensity), 1.0);
+    color = mix(sampleScene(uv), color, uIntensity);
+
+    // --- brightness / contrast --------------------------------------------
+    // Applied last, and outside the intensity mix, so it also corrects the
+    // raw image when the CRT pass is dialled off. The additive ghost and
+    // bloom passes lift the blacks noticeably on this game's dark art; this
+    // is the knob that pulls them back.
+    color *= uBrightness;
+    color = (color - 0.5) * uContrast + 0.5;
+
+    finalColor = vec4(clamp(color, 0.0, 1.0), 1.0);
 }
 `
 
@@ -139,6 +151,10 @@ export interface CrtOptions {
   pixelScale?: number
   /** 0 = untouched, 1 = full effect. */
   intensity?: number
+  /** 1 = unchanged. Applied after the CRT pass. */
+  brightness?: number
+  /** 1 = unchanged, pivoting around mid grey. Applied after the CRT pass. */
+  contrast?: number
 }
 
 export class CrtFilter extends Filter {
@@ -148,6 +164,8 @@ export class CrtFilter extends Filter {
       uPixelScale: { value: options.pixelScale ?? 2, type: 'f32' },
       uIntensity: { value: options.intensity ?? 1, type: 'f32' },
       uScreenSize: { value: new Float32Array([960, 540]), type: 'vec2<f32>' },
+      uBrightness: { value: options.brightness ?? 1, type: 'f32' },
+      uContrast: { value: options.contrast ?? 1, type: 'f32' },
     })
 
     super({
@@ -169,6 +187,8 @@ export class CrtFilter extends Filter {
       uPixelScale: number
       uIntensity: number
       uScreenSize: Float32Array
+      uBrightness: number
+      uContrast: number
     }
   }
 
@@ -193,6 +213,22 @@ export class CrtFilter extends Filter {
 
   set intensity(value: number) {
     this.uniforms.uIntensity = value
+  }
+
+  get brightness(): number {
+    return this.uniforms.uBrightness
+  }
+
+  set brightness(value: number) {
+    this.uniforms.uBrightness = value
+  }
+
+  get contrast(): number {
+    return this.uniforms.uContrast
+  }
+
+  set contrast(value: number) {
+    this.uniforms.uContrast = value
   }
 }
 
