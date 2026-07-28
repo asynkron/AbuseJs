@@ -196,4 +196,11 @@ export class LightLayer {
   get visibleCount(): number {
     return this.visible
   }
+
+  /** The overlay lives outside `World.root`, so it needs freeing separately. */
+  destroy(): void {
+    this.overlay.destroy()
+    this.target.destroy(true)
+    this.accumulator.destroy({ children: true })
+  }
 }

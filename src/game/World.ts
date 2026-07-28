@@ -13,6 +13,10 @@ import { Player } from './Player'
 import { spawnProps, type Prop } from './Prop'
 import { isBlocked, isGrounded } from './collision'
 
+/** How close the player must stand to an exit portal to use it. */
+const EXIT_REACH_X = 20
+const EXIT_REACH_Y = 40
+
 /**
  * Owns a loaded level and everything drawn in it.
  *
@@ -48,6 +52,16 @@ export class World {
   /** Level ambience, driven from the camera position. */
   private readonly ambience: AmbientSounds
 
+  /**
+   * Exit portals. NEXT_LEVEL stores its destination level number in `aistate`
+   * (lisp/people.lsp, next_level_ai) and the original triggers on touching it
+   * with the action key held.
+   */
+  private readonly exits: Prop[] = []
+
+  /** Set when the player uses an exit; main.ts polls and swaps levels. */
+  requestedLevel: string | null = null
+
   constructor(
     assets: GameAssets,
     readonly level: Level,
@@ -69,7 +83,10 @@ export class World {
     this.root.addChild(this.backdrop, this.scene)
 
     this.props = spawnProps(assets, level.objects)
-    for (const prop of this.props) this.propLayer.addChild(prop.sprite)
+    for (const prop of this.props) {
+      this.propLayer.addChild(prop.sprite)
+      if (prop.character === 'NEXT_LEVEL') this.exits.push(prop)
+    }
 
     this.ambience = new AmbientSounds(audio, level.objects)
 
@@ -112,6 +129,26 @@ export class World {
     // The player is the listener, not the camera - the camera lags behind.
     this.audio.setListener(this.player.x, this.player.y)
     this.ambience.update(this.player.x, this.player.y)
+
+    if (input.state.action) this.checkExits()
+  }
+
+  /** Standing on an exit with the action key held requests the next level. */
+  private checkExits(): void {
+    if (this.requestedLevel) return
+
+    for (const exit of this.exits) {
+      if (Math.abs(exit.x - this.player.x) > EXIT_REACH_X) continue
+      if (Math.abs(exit.y - this.player.y) > EXIT_REACH_Y) continue
+
+      const destination = exit.data.aistate
+      this.requestedLevel = `levels/level${String(destination).padStart(2, '0')}`
+      return
+    }
+  }
+
+  get exitCount(): number {
+    return this.exits.length
   }
 
   render(alpha: number, renderer: Renderer): void {
@@ -187,6 +224,16 @@ export class World {
 
   get ambientCount(): number {
     return this.ambience.count
+  }
+
+  /**
+   * Releases everything this world owns. Pixi does not free display objects on
+   * removal, and swapping levels would otherwise leak a render texture plus a
+   * few thousand sprites each time.
+   */
+  destroy(): void {
+    this.lights.destroy()
+    this.root.destroy({ children: true })
   }
 
   /**

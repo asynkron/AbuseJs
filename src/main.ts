@@ -142,9 +142,6 @@ async function start() {
   const requested = decodeURIComponent(location.hash.replace(/^#/, '')) || DEFAULT_LEVEL
   const levelId = assets.levels.some((l) => l.id === requested) ? requested : DEFAULT_LEVEL
 
-  say(`loading ${levelId}`)
-  const level = new Level(await assets.loadLevel(levelId), assets)
-
   const soundManifest = (await fetch('assets/sounds.json').then((r) => r.json())) as SoundManifest
   const audio = new AudioBank(soundManifest)
   // Browsers will not start an AudioContext without a gesture.
@@ -156,11 +153,36 @@ async function start() {
   let viewWidth = Math.ceil(app.renderer.screen.width / zoom)
   let viewHeight = Math.ceil(app.renderer.screen.height / zoom)
 
-  const world = new World(assets, level, viewWidth, viewHeight, audio)
-  world.root.scale.set(zoom)
-  // The light overlay multiplies over the finished scene, so it sits on top of
-  // the world but still inside the stage, and therefore under the CRT pass.
-  app.stage.addChild(world.root, world.lights.overlay)
+  let currentLevelId = levelId
+  let level!: Level
+  let world!: World
+
+  /**
+   * Builds the world for a level and swaps it in. Exit portals call this, so
+   * everything the old world owned has to go - Pixi does not free display
+   * objects for us.
+   */
+  const loadLevel = async (id: string) => {
+    say(`loading ${id}`)
+    const data = await assets.loadLevel(id)
+
+    if (world) {
+      app.stage.removeChild(world.root, world.lights.overlay)
+      world.destroy()
+    }
+
+    currentLevelId = id
+    level = new Level(data, assets)
+    world = new World(assets, level, viewWidth, viewHeight, audio)
+    world.root.scale.set(zoom)
+    // The light overlay multiplies over the finished scene, so it sits on top
+    // of the world but still inside the stage, and therefore under the CRT.
+    app.stage.addChild(world.root, world.lights.overlay)
+    world.resize(viewWidth, viewHeight, zoom)
+    if (location.hash.replace(/^#/, '') !== id) history.replaceState(null, '', `#${id}`)
+  }
+
+  await loadLevel(levelId)
 
   const input = new Input()
 
@@ -209,9 +231,27 @@ async function start() {
   let fps = 0
   let fpsClock = performance.now()
 
-  const loop = new GameLoop(
-    () => world.update(input),
-    (alpha) => {
+  let switching = false
+
+  /** One simulation step. The debug harness uses this too, so exits work there. */
+  const tick = () => {
+    world.update(input)
+
+    // An exit was used. Only levels we actually have are accepted; the
+    // original's training level points at a few that were never shipped.
+    const requested = world.requestedLevel
+    if (requested && !switching) {
+      world.requestedLevel = null
+      if (assets.levels.some((l) => l.id === requested)) {
+        switching = true
+        void loadLevel(requested).finally(() => {
+          switching = false
+        })
+      }
+    }
+  }
+
+  const loop = new GameLoop(tick, (alpha) => {
       applySize()
       crt.time = performance.now() / 1000
       world.render(alpha, app.renderer)
@@ -224,7 +264,7 @@ async function start() {
         frames = 0
         fpsClock = now
         hud.textContent = [
-          `${levelId}  "${level.name}"  ${level.fgWidth}x${level.fgHeight} tiles`,
+          `${currentLevelId}  "${level.name}"  ${level.fgWidth}x${level.fgHeight} tiles`,
           `pos ${world.player.x.toFixed(0)},${world.player.y.toFixed(0)}  ${world.player.state}` +
             `${world.player.onGround ? '' : ' (air)'}  x${zoom}  ${fps}fps  ${world.spriteCount} sprites` +
             `  ${world.lights.visibleCount}/${level.lighting.lights.length} lights` +
@@ -232,7 +272,7 @@ async function start() {
           `props ${world.propCounts.visible}/${world.propCounts.total} drawn` +
             `   audio ${audio.muted ? 'muted' : `${audio.loadedCount} clips, ${world.ambientCount} emitters`}`,
           world.objectSummary,
-          `arrows/WASD move   space jump   shift run` +
+          `arrows/WASD move   space jump   shift run   E use (${world.exitCount} exits)` +
             `   V crt:${crtEnabled ? 'on' : 'off'}   L light:${world.lights.enabled ? 'on' : 'off'}`,
         ].join('\n')
       }
@@ -248,11 +288,19 @@ async function start() {
     // paused whenever the document reports itself hidden.
     ;(window as unknown as Record<string, unknown>).game = {
       app,
-      world,
       input,
-      level,
+      // Getters, not values: both are replaced whenever a level is loaded.
+      get world() {
+        return world
+      },
+      get level() {
+        return level
+      },
+      get levelId() {
+        return currentLevelId
+      },
       step(ticks = 1) {
-        for (let i = 0; i < ticks; i++) world.update(input)
+        for (let i = 0; i < ticks; i++) tick()
         applySize()
         world.render(0, app.renderer)
         app.render()

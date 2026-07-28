@@ -15,7 +15,10 @@ export class Prop extends Entity {
   /** Animation rate in frames per second. */
   private static readonly FPS = 10
 
-  constructor(assets: GameAssets, data: LevelObjectData) {
+  constructor(
+    assets: GameAssets,
+    readonly data: LevelObjectData,
+  ) {
     super(assets, data.type)
     this.setPosition(data.x, data.y)
     this.direction = data.direction < 0 ? -1 : 1
