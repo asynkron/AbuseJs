@@ -12,6 +12,12 @@ export interface TileMeta {
   damage?: number
   /** Collision box [x0, y0, x1, y1] in tile-local pixels. Absent means passable. */
   bb?: [number, number, number, number]
+  /**
+   * Per-column solid span `[top, bottom]`, inclusive, or null for an empty
+   * column. Present only for ramps and other tiles whose outline is not just
+   * its bounding box.
+   */
+  cols?: ([number, number] | null)[]
   /** Original collision outline, kept for slope support later. */
   boundary?: number[]
 }

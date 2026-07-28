@@ -43,6 +43,8 @@ export class Level {
 
   /** Per-tile-id collision box, or null when the tile is passable. */
   private readonly solidBoxes: (SolidBox | null)[] = []
+  /** Per-tile-id column spans, for ramps. Undefined means "use the box". */
+  private readonly solidColumns: (([number, number] | null)[] | undefined)[] = []
 
   constructor(
     readonly data: LevelData,
@@ -68,6 +70,7 @@ export class Level {
       this.solidBoxes[index] = meta.bb
         ? { x0: meta.bb[0], y0: meta.bb[1], x1: meta.bb[2], y1: meta.bb[3] }
         : null
+      this.solidColumns[index] = meta.cols
     }
   }
 
@@ -129,6 +132,51 @@ export class Level {
       x1: cx * this.tileW + box.x1,
       y1: cy * this.tileH + box.y1,
     }
+  }
+
+  /**
+   * The solid vertical span of one cell, restricted to the world-x range
+   * `[xFrom, xTo)`, in world coordinates. Null when nothing there blocks.
+   *
+   * Shaped tiles (ramps) carry a solid span per pixel column; this collapses
+   * the columns the body actually overlaps into the highest top and lowest
+   * bottom, which is what a swept AABB needs. Flat tiles skip the loop.
+   */
+  spanInRange(cx: number, cy: number, xFrom: number, xTo: number): { top: number; bottom: number } | null {
+    if (cx < 0 || cy < 0 || cx >= this.fgWidth || cy >= this.fgHeight) {
+      // Outside the map is solid, so nothing walks off the edge.
+      return { top: cy * this.tileH, bottom: (cy + 1) * this.tileH }
+    }
+
+    const tile = this.fgCells[cy * this.fgWidth + cx] & TILE_MASK
+    const box = this.solidBoxes[tile]
+    if (!box) return null
+
+    const cellX = cx * this.tileW
+    const cellY = cy * this.tileH
+    const columns = this.solidColumns[tile]
+
+    if (!columns) {
+      // Flat tile: the box is the whole story, but still respect its x range.
+      if (xTo <= cellX + box.x0 || xFrom >= cellX + box.x1) return null
+      return { top: cellY + box.y0, bottom: cellY + box.y1 }
+    }
+
+    const first = Math.max(0, Math.floor(xFrom) - cellX)
+    const last = Math.min(columns.length - 1, Math.ceil(xTo) - 1 - cellX)
+
+    let top = Infinity
+    let bottom = -Infinity
+    for (let i = first; i <= last; i++) {
+      const span = columns[i]
+      if (!span) continue
+      if (span[0] < top) top = span[0]
+      if (span[1] > bottom) bottom = span[1]
+    }
+
+    if (top === Infinity) return null
+    // Spans are inclusive; collision works in half-open ranges.
+    return { top: cellY + top, bottom: cellY + bottom + 1 }
   }
 
   /** First object of the given type, or undefined. */

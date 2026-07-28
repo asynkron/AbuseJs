@@ -197,14 +197,70 @@ interface TileMeta {
   damage?: number
   /** Collision box [x0, y0, x1, y1] in tile-local pixels; absent means passable. */
   bb?: [number, number, number, number]
+  /**
+   * Per-column solid span `[top, bottom]` (inclusive) or null. Present only
+   * when the outline is not simply its bounding box - that is, for ramps and
+   * other shaped tiles. Absent means "use `bb`".
+   */
+  cols?: (number[] | null)[]
   boundary?: number[]
+}
+
+/**
+ * Rasterises a tile's collision outline into one solid span per pixel column.
+ *
+ * The outline is a closed polygon in tile-local pixels. Every shape in the
+ * data has a single contiguous solid span per column, so intersecting the
+ * vertical line at each x with all edges and taking the lowest and highest
+ * crossing gives exactly the solid range - and unlike a point-in-polygon test
+ * it has no trouble with points that sit exactly on the boundary, which is
+ * where all of these vertices live.
+ *
+ * Returns `[top, bottom]` pairs, inclusive, or `null` per empty column.
+ */
+function boundarySpans(boundary: number[], width: number): (number[] | null)[] {
+  const points: [number, number][] = []
+  for (let i = 0; i < boundary.length; i += 2) points.push([boundary[i], boundary[i + 1]])
+
+  const spans: (number[] | null)[] = []
+
+  for (let x = 0; x < width; x++) {
+    let top = Infinity
+    let bottom = -Infinity
+
+    for (let i = 0; i < points.length - 1; i++) {
+      const [x0, y0] = points[i]
+      const [x1, y1] = points[i + 1]
+
+      if (x0 === x1) {
+        // Vertical edge: covers its whole y range at this column.
+        if (x0 !== x) continue
+        top = Math.min(top, y0, y1)
+        bottom = Math.max(bottom, y0, y1)
+        continue
+      }
+
+      if (x < Math.min(x0, x1) || x > Math.max(x0, x1)) continue
+      const y = y0 + ((x - x0) * (y1 - y0)) / (x1 - x0)
+      top = Math.min(top, y)
+      bottom = Math.max(bottom, y)
+    }
+
+    spans.push(Number.isFinite(top) ? [Math.round(top), Math.round(bottom)] : null)
+  }
+
+  return spans
+}
+
+/** True when the outline fills its whole bounding box - the common case. */
+function isFullRect(spans: (number[] | null)[], height: number): boolean {
+  return spans.every((s) => s !== null && s[0] === 0 && s[1] === height - 1)
 }
 
 /**
  * A foreground tile is solid exactly when it carries a collision outline - the
  * engine intersects movement against these points, so a tile with none is
- * walked straight through. We collapse the outline to its bounding box for now;
- * the raw points ship alongside it so slopes can be done properly later.
+ * walked straight through.
  */
 function boundaryBox(boundary: number[]): [number, number, number, number] | undefined {
   if (boundary.length < 4) return undefined
@@ -287,9 +343,21 @@ async function convertTiles(palette: Buffer, tileFiles: string[]) {
     }
 
     const tiles: Record<string, TileMeta> = {}
+    let shaped = 0
     for (const rect of atlas.rects) {
       const src = set.get(Number(rect.key))!
       const bb = src.boundary ? boundaryBox(src.boundary) : undefined
+
+      // Only ship per-column spans when they say something the box does not.
+      let cols: (number[] | null)[] | undefined
+      if (bb && src.boundary && src.boundary.length >= 6) {
+        const spans = boundarySpans(src.boundary, rect.width)
+        if (!isFullRect(spans, rect.height)) {
+          cols = spans
+          shaped++
+        }
+      }
+
       tiles[rect.key] = {
         p: rect.page,
         x: rect.x,
@@ -299,10 +367,11 @@ async function convertTiles(palette: Buffer, tileFiles: string[]) {
         next: src.next,
         ...(src.damage ? { damage: src.damage } : {}),
         ...(bb ? { bb } : {}),
+        ...(cols ? { cols } : {}),
         ...(src.boundary && src.boundary.length ? { boundary: src.boundary } : {}),
       }
     }
-    return { pages, tiles, count: items.length }
+    return { pages, tiles, count: items.length, shaped }
   }
 
   // Cell size comes from tile 0 in the engine (loader2.cpp:453): 30x15 fg,
@@ -315,7 +384,12 @@ async function convertTiles(palette: Buffer, tileFiles: string[]) {
     back: { cellW: 60, cellH: 30, pages: backOut.pages, tiles: backOut.tiles },
   })
 
-  return { fore: foreOut.count, back: backOut.count, pages: foreOut.pages.length + backOut.pages.length }
+  return {
+    fore: foreOut.count,
+    back: backOut.count,
+    shaped: foreOut.shaped,
+    pages: foreOut.pages.length + backOut.pages.length,
+  }
 }
 
 /* ------------------------------------------------------------------ */
@@ -705,7 +779,7 @@ async function main() {
     [
       '',
       'done in ' + ((Date.now() - started) / 1000).toFixed(1) + 's',
-      `  foreground tiles : ${tiles.fore}`,
+      `  foreground tiles : ${tiles.fore} (${tiles.shaped} ramps/shaped)`,
       `  background tiles : ${tiles.back}`,
       `  tile atlas pages : ${tiles.pages}`,
       `  character frames : ${sprites.frames} on ${sprites.framePages} page(s)`,

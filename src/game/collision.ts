@@ -1,4 +1,4 @@
-import type { Level, SolidBox } from './Level'
+import type { Level } from './Level'
 
 /**
  * Axis-aligned body. `x` is the horizontal anchor and `y` is the feet, matching
@@ -17,17 +17,35 @@ export interface CollisionResult {
   hitWall: boolean
 }
 
-/** Ledges up to this tall are climbed automatically instead of blocking. */
-const STEP_HEIGHT = 7
+/**
+ * Ledges up to this tall are climbed automatically instead of blocking. Also
+ * what lets the body walk up a ramp: a 30x15 slope rises at most 0.5px per
+ * pixel travelled, far inside this.
+ */
+const STEP_HEIGHT = 8
 
-function forEachSolid(
+/**
+ * Movement is applied in steps no larger than this. Small steps mean a
+ * collision can be resolved by simply undoing the step, with an error under a
+ * couple of pixels, which keeps the solver simple enough to reason about on
+ * ramps where there is no single "wall plane" to snap to.
+ */
+const MAX_STEP = 2
+
+/**
+ * Visits the solid span of every cell the body overlaps, already restricted to
+ * the body's own x range.
+ */
+function forEachSpan(
   level: Level,
-  left: number,
-  top: number,
-  right: number,
-  bottom: number,
-  visit: (box: SolidBox) => void,
+  body: Body,
+  visit: (top: number, bottom: number) => void,
 ): void {
+  const left = body.x - body.halfWidth
+  const right = body.x + body.halfWidth
+  const top = body.y - body.height
+  const bottom = body.y
+
   const cx0 = Math.floor(left / level.tileW)
   const cx1 = Math.floor((right - 0.0001) / level.tileW)
   const cy0 = Math.floor(top / level.tileH)
@@ -35,32 +53,48 @@ function forEachSolid(
 
   for (let cy = cy0; cy <= cy1; cy++) {
     for (let cx = cx0; cx <= cx1; cx++) {
-      const box = level.solidAt(cx, cy)
-      if (!box) continue
-      if (box.x1 <= left || box.x0 >= right || box.y1 <= top || box.y0 >= bottom) continue
-      visit(box)
+      const span = level.spanInRange(cx, cy, left, right)
+      if (!span) continue
+      if (span.bottom <= top || span.top >= bottom) continue
+      visit(span.top, span.bottom)
     }
   }
 }
 
 export function isBlocked(level: Level, body: Body): boolean {
   let blocked = false
-  forEachSolid(level, body.x - body.halfWidth, body.y - body.height, body.x + body.halfWidth, body.y, () => {
+  forEachSpan(level, body, () => {
     blocked = true
   })
   return blocked
 }
 
+/** Highest solid surface the body currently intersects, or null. */
+function obstructionTop(level: Level, body: Body): number | null {
+  let top: number | null = null
+  forEachSpan(level, body, (spanTop) => {
+    if (top === null || spanTop < top) top = spanTop
+  })
+  return top
+}
+
+/** Lowest solid underside the body currently intersects, or null. */
+function obstructionBottom(level: Level, body: Body): number | null {
+  let bottom: number | null = null
+  forEachSpan(level, body, (_top, spanBottom) => {
+    if (bottom === null || spanBottom > bottom) bottom = spanBottom
+  })
+  return bottom
+}
+
 /**
  * Moves the body by (dx, dy), resolving against the tile grid one axis at a
- * time. Movement is split into sub-steps no larger than half a tile so fast
- * bodies cannot tunnel through thin floors.
+ * time and in small steps.
  */
 export function moveAndCollide(level: Level, body: Body, dx: number, dy: number): CollisionResult {
   const result: CollisionResult = { onGround: false, hitCeiling: false, hitWall: false }
 
-  const maxStep = Math.min(level.tileW, level.tileH) / 2
-  const steps = Math.max(1, Math.ceil(Math.max(Math.abs(dx), Math.abs(dy)) / maxStep))
+  const steps = Math.max(1, Math.ceil(Math.max(Math.abs(dx), Math.abs(dy)) / MAX_STEP))
   const stepX = dx / steps
   const stepY = dy / steps
 
@@ -73,58 +107,42 @@ export function moveAndCollide(level: Level, body: Body, dx: number, dy: number)
 }
 
 function moveX(level: Level, body: Body, dx: number, result: CollisionResult): void {
+  const previousX = body.x
   body.x += dx
+  if (!isBlocked(level, body)) return
 
-  const top = body.y - body.height
-  const bottom = body.y
-  let limit = dx > 0 ? Infinity : -Infinity
-  let obstructionTop = Infinity
-  let blocked = false
-
-  forEachSolid(level, body.x - body.halfWidth, top, body.x + body.halfWidth, bottom, (box) => {
-    blocked = true
-    obstructionTop = Math.min(obstructionTop, box.y0)
-    limit = dx > 0 ? Math.min(limit, box.x0) : Math.max(limit, box.x1)
-  })
-
-  if (!blocked) return
-
-  // Small ledges get stepped over rather than stopping the body dead.
-  const rise = bottom - obstructionTop
-  if (rise > 0 && rise <= STEP_HEIGHT) {
-    const lifted: Body = { ...body, y: obstructionTop }
-    if (!isBlocked(level, lifted)) {
-      body.y = obstructionTop
-      return
-    }
+  // A low obstruction gets stepped over rather than stopping the body. This is
+  // also how ramps are climbed.
+  const top = obstructionTop(level, body)
+  if (top !== null && body.y > top && body.y - top <= STEP_HEIGHT) {
+    const previousY = body.y
+    body.y = top
+    if (!isBlocked(level, body)) return
+    body.y = previousY
   }
 
-  body.x = dx > 0 ? limit - body.halfWidth : limit + body.halfWidth
+  body.x = previousX
   result.hitWall = true
 }
 
 function moveY(level: Level, body: Body, dy: number, result: CollisionResult): void {
+  const previousY = body.y
   body.y += dy
-
-  const left = body.x - body.halfWidth
-  const right = body.x + body.halfWidth
-  let limit = dy > 0 ? Infinity : -Infinity
-  let blocked = false
-
-  forEachSolid(level, left, body.y - body.height, right, body.y, (box) => {
-    blocked = true
-    limit = dy > 0 ? Math.min(limit, box.y0) : Math.max(limit, box.y1)
-  })
-
-  if (!blocked) return
+  if (!isBlocked(level, body)) return
 
   if (dy > 0) {
-    body.y = limit
+    const top = obstructionTop(level, body)
+    if (top !== null) body.y = top
     result.onGround = true
   } else {
-    body.y = limit + body.height
+    const bottom = obstructionBottom(level, body)
+    if (bottom !== null) body.y = bottom + body.height
     result.hitCeiling = true
   }
+
+  // Snapping can land inside something else on a busy tile; undoing the step
+  // is always safe because the previous position was clear.
+  if (isBlocked(level, body)) body.y = previousY
 }
 
 /** True when solid ground sits directly under the body. */
