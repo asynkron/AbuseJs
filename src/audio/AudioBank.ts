@@ -88,6 +88,23 @@ export class AudioBank {
     return this.masterVolume <= 0
   }
 
+  /** The shared context, once unlocked. */
+  get context_(): AudioContext | null {
+    return this.context
+  }
+
+  /**
+   * A gain node feeding the master bus, for something that manages its own
+   * scheduling - the music player. Null until the context is unlocked.
+   */
+  createBus(gain = 1): GainNode | null {
+    if (!this.context || !this.master) return null
+    const bus = this.context.createGain()
+    bus.gain.value = gain
+    bus.connect(this.master)
+    return bus
+  }
+
   /** Resolves a symbolic name like `LSABER_SND` to its path. */
   pathFor(name: string): string | undefined {
     return this.manifest.named[name]

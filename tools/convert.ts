@@ -8,7 +8,7 @@
  * files remain the source of truth.
  */
 
-import { mkdir, readFile, writeFile, readdir, copyFile, rm } from 'node:fs/promises'
+import { mkdir, readFile, writeFile as writeFileRaw, readdir, copyFile, rm } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
 import { join, relative, dirname, basename, extname } from 'node:path'
 
@@ -43,6 +43,7 @@ import {
   type SoundTable,
 } from './lisp.js'
 import { packGrid, packShelves, writePage, type PackInput } from './atlas.js'
+import { hmiToMidi } from './hmi.js'
 
 const SRC = 'assets/original'
 const OUT = 'public/assets'
@@ -90,7 +91,7 @@ function toRGBA(image: PalettizedImage, palette: Buffer, transparentIndex0: bool
 
 async function writeJSON(path: string, value: unknown): Promise<void> {
   await mkdir(dirname(path), { recursive: true })
-  await writeFile(path, JSON.stringify(value))
+  await writeFileRaw(path, JSON.stringify(value))
 }
 
 function base64OfU16(cells: Uint16Array): string {
@@ -841,6 +842,33 @@ function readObjects(spec: SpecFile, buf: Buffer): LevelObject[] {
 /* sound                                                               */
 /* ------------------------------------------------------------------ */
 
+/** Converts the HMI soundtrack to standard MIDI. */
+async function convertMusic() {
+  const files = await listFiles(join(SRC, 'music'), '.hmi')
+  await mkdir(join(OUT, 'music'), { recursive: true })
+
+  const tracks: { id: string; file: string; bytes: number }[] = []
+  for (const file of files) {
+    const buf = await readFile(file)
+    let midi: Buffer | null = null
+    try {
+      midi = hmiToMidi(buf)
+    } catch (err) {
+      console.warn(`  ! music ${assetId(file)}: ${(err as Error).message}`)
+    }
+    if (!midi) continue
+
+    const id = basename(file, '.hmi')
+    const out = `music/${id}.mid`
+    await writeFileRaw(join(OUT, out), midi)
+    tracks.push({ id, file: out, bytes: midi.length })
+  }
+
+  tracks.sort((a, b) => a.id.localeCompare(b.id))
+  await writeJSON(join(OUT, 'music.json'), tracks)
+  return tracks.length
+}
+
 async function copySounds() {
   // The core set lives in sfx/, but addons ship their own alongside their art.
   const files = await listFiles(SRC, '.wav')
@@ -896,6 +924,9 @@ async function main() {
   console.log('converting levels...')
   const levels = await convertLevels()
 
+  console.log('converting music...')
+  const music = await convertMusic()
+
   console.log('copying sound effects...')
   const sounds = await copySounds()
   await writeJSON(join(OUT, 'sounds.json'), {
@@ -921,6 +952,7 @@ async function main() {
         `, ${(lisp.sounds.arrays.AMB_SOUNDS ?? []).filter(Boolean).length}/17 ambient`,
       `  palette tints    : ${Object.keys(tints).length}`,
       `  train messages   : ${Object.keys(lisp.trainMessages).length}`,
+      `  music tracks     : ${music} (HMI -> MIDI)`,
     ].join('\n'),
   )
 }

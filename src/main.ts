@@ -2,6 +2,7 @@ import { Application } from 'pixi.js'
 
 import { GameAssets } from './assets/loader'
 import { AudioBank, type SoundManifest } from './audio/AudioBank'
+import { MusicPlayer } from './audio/MusicPlayer'
 import { GameLoop } from './core/loop'
 import { Input } from './core/input'
 import { Level } from './game/Level'
@@ -56,7 +57,12 @@ function loadPictureSettings(): typeof PICTURE_DEFAULTS {
 }
 
 /** Wires the top-right picture and volume sliders. */
-function mountPictureControls(crt: CrtFilter, audio: AudioBank, initialVolume: number): void {
+function mountPictureControls(
+  crt: CrtFilter,
+  audio: AudioBank,
+  initialVolume: number,
+  onVolumeChange: (muted: boolean) => void,
+): void {
   const panel = document.getElementById('controls') as HTMLDivElement | null
   const brightness = document.getElementById('brightness') as HTMLInputElement | null
   const contrast = document.getElementById('contrast') as HTMLInputElement | null
@@ -98,8 +104,15 @@ function mountPictureControls(crt: CrtFilter, audio: AudioBank, initialVolume: n
   volume.value = String(initialVolume)
   sync(false)
 
+  let wasMuted = audio.muted
   for (const slider of [brightness, contrast, volume]) {
-    slider.addEventListener('input', () => sync(true))
+    slider.addEventListener('input', () => {
+      sync(true)
+      if (audio.muted !== wasMuted) {
+        wasMuted = audio.muted
+        onVolumeChange(audio.muted)
+      }
+    })
     // A focused slider would swallow space and the arrow keys, so hand the
     // keyboard straight back to the game once the drag is over.
     slider.addEventListener('change', () => slider.blur())
@@ -115,6 +128,13 @@ function mountPictureControls(crt: CrtFilter, audio: AudioBank, initialVolume: n
   })
 
   panel.hidden = false
+}
+
+/** Stable, tiny hash so a level always picks the same fallback track. */
+function hashString(text: string): number {
+  let hash = 0
+  for (let i = 0; i < text.length; i++) hash = (hash * 31 + text.charCodeAt(i)) | 0
+  return hash
 }
 
 function integerZoom(width: number, height: number): number {
@@ -147,8 +167,18 @@ async function start() {
   const trainMessages = (await fetch('assets/messages.json').then((r) => r.json())) as {
     train: Record<number, string>
   }
-  // Browsers will not start an AudioContext without a gesture.
-  const unlockAudio = () => audio.unlock()
+  const musicTracks = (await fetch('assets/music.json').then((r) => r.json())) as {
+    id: string
+    file: string
+  }[]
+  const music = new MusicPlayer(audio)
+  // Browsers will not start an AudioContext without a gesture. A level can
+  // therefore load before there is anywhere to play music, so the first
+  // gesture also has to kick the soundtrack off.
+  const unlockAudio = () => {
+    audio.unlock()
+    startMusicFor(currentLevelId)
+  }
   window.addEventListener('keydown', unlockAudio)
   window.addEventListener('pointerdown', unlockAudio)
 
@@ -184,6 +214,21 @@ async function start() {
     app.stage.addChild(world.root, world.lights.overlay, world.messages.container)
     world.resize(viewWidth, viewHeight, zoom)
     if (location.hash.replace(/^#/, '') !== id) history.replaceState(null, '', `#${id}`)
+    startMusicFor(id)
+  }
+
+  /**
+   * Picks a track for a level. `levels/levelNN` maps to `abuseNN` where that
+   * exists - the naming lines up - and anything else cycles the list so every
+   * level gets something.
+   */
+  const startMusicFor = (id: string) => {
+    if (musicTracks.length === 0 || audio.muted) return
+    const number = /level(\d+)/.exec(id)?.[1]
+    const named = number ? musicTracks.find((t) => t.id === `abuse${number}`) : undefined
+    const chosen = named ?? musicTracks[Math.abs(hashString(id)) % musicTracks.length]
+    if (music.track === chosen.file) return
+    void music.play(chosen.file)
   }
 
   await loadLevel(levelId)
@@ -203,7 +248,15 @@ async function start() {
     crt.intensity = on ? 1 : 0
   }
 
-  mountPictureControls(crt, audio, picture.volume)
+  mountPictureControls(crt, audio, picture.volume, (muted) => {
+    // Unmuting has to (re)start the soundtrack, since it never started while
+    // silent - and the AudioContext may only just have been unlocked.
+    if (muted) music.stop()
+    else {
+      audio.unlock()
+      startMusicFor(currentLevelId)
+    }
+  })
 
   // The renderer is the source of truth for size: Pixi's own resizeTo observer
   // can change it without a window resize event ever reaching us.
@@ -274,7 +327,11 @@ async function start() {
             `  ${world.lights.visibleCount}/${level.lighting.lights.length} lights` +
             ` @ambient ${level.lighting.minLight}/63`,
           `props ${world.propCounts.visible}/${world.propCounts.total} drawn` +
-            `   audio ${audio.muted ? 'muted' : `${audio.loadedCount} clips, ${world.ambientCount} emitters`}`,
+            `   audio ${
+              audio.muted
+                ? 'muted'
+                : `${audio.loadedCount} clips, ${world.ambientCount} emitters, music ${music.track ?? 'none'}`
+            }`,
           world.objectSummary,
           `arrows/WASD move   space jump   shift run   E use (${world.exitCount} exits)` +
             `   V crt:${crtEnabled ? 'on' : 'off'}   L light:${world.lights.enabled ? 'on' : 'off'}`,
@@ -293,6 +350,8 @@ async function start() {
     ;(window as unknown as Record<string, unknown>).game = {
       app,
       input,
+      audio,
+      music,
       // Getters, not values: both are replaced whenever a level is loaded.
       get world() {
         return world
