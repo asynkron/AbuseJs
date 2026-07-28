@@ -40,6 +40,8 @@ export class AudioBank {
   /** Listener position in world space, kept in sync with the camera. */
   private listenerX = 0
   private listenerY = 0
+  /** Starts muted; the volume slider is the only way to turn it up. */
+  private masterVolume = 0
 
   constructor(
     private readonly manifest: SoundManifest,
@@ -56,7 +58,9 @@ export class AudioBank {
       if (!Ctor) return
       this.context = new Ctor()
       this.master = this.context.createGain()
-      this.master.gain.value = 0.6
+      // Silent until asked for. Abuse's ambience is mostly distant screaming,
+      // which is not what anyone wants a page to do unprompted.
+      this.master.gain.value = this.masterVolume
       this.master.connect(this.context.destination)
     }
     if (this.context.state === 'suspended') void this.context.resume()
@@ -71,8 +75,17 @@ export class AudioBank {
     this.listenerY = y
   }
 
+  get volume(): number {
+    return this.masterVolume
+  }
+
   set volume(value: number) {
-    if (this.master) this.master.gain.value = Math.max(0, Math.min(1, value))
+    this.masterVolume = Math.max(0, Math.min(1, value))
+    if (this.master) this.master.gain.value = this.masterVolume
+  }
+
+  get muted(): boolean {
+    return this.masterVolume <= 0
   }
 
   /** Resolves a symbolic name like `LSABER_SND` to its path. */
@@ -120,6 +133,8 @@ export class AudioBank {
    */
   play(path: string, options: PlayOptions = {}): void {
     if (!this.context || !this.master) return
+    // Muted means muted: do not even fetch the clip.
+    if (this.masterVolume <= 0) return
 
     let gain = options.volume ?? 1
     let pan = 0

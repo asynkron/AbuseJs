@@ -5,6 +5,8 @@ export interface InputState {
   down: boolean
   jump: boolean
   run: boolean
+  /** Use / enter - the original's "action key". */
+  action: boolean
 }
 
 const BINDINGS: Record<string, keyof InputState> = {
@@ -19,6 +21,8 @@ const BINDINGS: Record<string, keyof InputState> = {
   Space: 'jump',
   ShiftLeft: 'run',
   ShiftRight: 'run',
+  KeyE: 'action',
+  Enter: 'action',
 }
 
 export class Input {
@@ -29,6 +33,7 @@ export class Input {
     down: false,
     jump: false,
     run: false,
+    action: false,
   }
 
   /** Latest pointer position in CSS pixels, for aiming. */

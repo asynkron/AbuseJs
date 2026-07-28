@@ -32,44 +32,60 @@ function say(message: string): void {
 const PICTURE_KEY = 'abusejs.picture'
 /**
  * Not 1.0/1.0: the CRT pass's additive ghosting and bloom wash the image out,
- * and this is the trim that reads best against Abuse's dark art.
+ * and this is the trim that reads best against Abuse's dark art. Volume starts
+ * at 0 on purpose - a page should not start screaming at you.
  */
-const PICTURE_DEFAULTS = { brightness: 1.2, contrast: 1.2 }
+const PICTURE_DEFAULTS = { brightness: 1.2, contrast: 1.2, volume: 0 }
 
-function loadPictureSettings(): { brightness: number; contrast: number } {
+function loadPictureSettings(): typeof PICTURE_DEFAULTS {
   try {
     const stored = localStorage.getItem(PICTURE_KEY)
     if (!stored) return { ...PICTURE_DEFAULTS }
     const parsed = JSON.parse(stored) as Partial<typeof PICTURE_DEFAULTS>
+    const volume = Number(parsed.volume)
     return {
       brightness: Number(parsed.brightness) || PICTURE_DEFAULTS.brightness,
       contrast: Number(parsed.contrast) || PICTURE_DEFAULTS.contrast,
+      // `||` would turn a deliberate 0 back into the default, but 0 is the
+      // default here anyway - be explicit so it stays correct if that changes.
+      volume: Number.isFinite(volume) ? volume : PICTURE_DEFAULTS.volume,
     }
   } catch {
     return { ...PICTURE_DEFAULTS }
   }
 }
 
-/** Wires the top-right brightness/contrast sliders to the CRT pass. */
-function mountPictureControls(crt: CrtFilter): void {
+/** Wires the top-right picture and volume sliders. */
+function mountPictureControls(crt: CrtFilter, audio: AudioBank, initialVolume: number): void {
   const panel = document.getElementById('controls') as HTMLDivElement | null
   const brightness = document.getElementById('brightness') as HTMLInputElement | null
   const contrast = document.getElementById('contrast') as HTMLInputElement | null
+  const volume = document.getElementById('volume') as HTMLInputElement | null
   const brightnessVal = document.getElementById('brightness-val')
   const contrastVal = document.getElementById('contrast-val')
+  const volumeVal = document.getElementById('volume-val')
   const reset = document.getElementById('reset-levels')
-  if (!panel || !brightness || !contrast || !brightnessVal || !contrastVal || !reset) return
+  if (!panel || !brightness || !contrast || !volume) return
+  if (!brightnessVal || !contrastVal || !volumeVal || !reset) return
 
   const sync = (persist: boolean) => {
     crt.brightness = Number(brightness.value)
     crt.contrast = Number(contrast.value)
+    audio.volume = Number(volume.value)
+
     brightnessVal.textContent = crt.brightness.toFixed(2)
     contrastVal.textContent = crt.contrast.toFixed(2)
+    volumeVal.textContent = audio.muted ? 'off' : audio.volume.toFixed(2)
+
     if (persist) {
       try {
         localStorage.setItem(
           PICTURE_KEY,
-          JSON.stringify({ brightness: crt.brightness, contrast: crt.contrast }),
+          JSON.stringify({
+            brightness: crt.brightness,
+            contrast: crt.contrast,
+            volume: audio.volume,
+          }),
         )
       } catch {
         // Private browsing and the like - the sliders still work, just not across reloads.
@@ -79,9 +95,10 @@ function mountPictureControls(crt: CrtFilter): void {
 
   brightness.value = String(crt.brightness)
   contrast.value = String(crt.contrast)
+  volume.value = String(initialVolume)
   sync(false)
 
-  for (const slider of [brightness, contrast]) {
+  for (const slider of [brightness, contrast, volume]) {
     slider.addEventListener('input', () => sync(true))
     // A focused slider would swallow space and the arrow keys, so hand the
     // keyboard straight back to the game once the drag is over.
@@ -92,6 +109,7 @@ function mountPictureControls(crt: CrtFilter): void {
   reset.addEventListener('click', () => {
     brightness.value = String(PICTURE_DEFAULTS.brightness)
     contrast.value = String(PICTURE_DEFAULTS.contrast)
+    volume.value = String(PICTURE_DEFAULTS.volume)
     sync(true)
     reset.blur()
   })
@@ -148,8 +166,10 @@ async function start() {
 
   // The filter stays attached even with the CRT dialled off, so the
   // brightness/contrast trim still applies to the raw image.
-  const crt = new CrtFilter(loadPictureSettings())
+  const picture = loadPictureSettings()
+  const crt = new CrtFilter(picture)
   app.stage.filters = [crt]
+  audio.volume = picture.volume
 
   let crtEnabled = true
   const setCrtEnabled = (on: boolean) => {
@@ -157,7 +177,7 @@ async function start() {
     crt.intensity = on ? 1 : 0
   }
 
-  mountPictureControls(crt)
+  mountPictureControls(crt, audio, picture.volume)
 
   // The renderer is the source of truth for size: Pixi's own resizeTo observer
   // can change it without a window resize event ever reaching us.
@@ -210,7 +230,7 @@ async function start() {
             `  ${world.lights.visibleCount}/${level.lighting.lights.length} lights` +
             ` @ambient ${level.lighting.minLight}/63`,
           `props ${world.propCounts.visible}/${world.propCounts.total} drawn` +
-            `   audio ${audio.ready ? `${audio.loadedCount} clips, ${world.ambientCount} emitters` : 'press a key'}`,
+            `   audio ${audio.muted ? 'muted' : `${audio.loadedCount} clips, ${world.ambientCount} emitters`}`,
           world.objectSummary,
           `arrows/WASD move   space jump   shift run` +
             `   V crt:${crtEnabled ? 'on' : 'off'}   L light:${world.lights.enabled ? 'on' : 'off'}`,
