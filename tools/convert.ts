@@ -34,6 +34,7 @@ import {
   expandCharacterTemplates,
   extractEditorOnlyDrawFuns,
   extractSounds,
+  extractTrainMessages,
   isSymbol,
   walk,
   type CharacterDef,
@@ -138,6 +139,8 @@ interface LispScan {
   /** Draw functions that only run in the level editor. */
   editorOnlyDrawFuns: Set<string>
   sounds: SoundTable
+  /** TRAIN_MSG tutorial lines, keyed by message number. */
+  trainMessages: Record<number, string>
 }
 
 async function scanLisp(): Promise<LispScan> {
@@ -154,6 +157,7 @@ async function scanLisp(): Promise<LispScan> {
   // `dev_draw` is a built-in; the rest are found by shape in the scripts.
   const editorOnlyDrawFuns = new Set<string>(['dev_draw'])
   let sounds: SoundTable = { named: {}, arrays: {} }
+  let trainMessages: Record<number, string> = {}
 
   for (const file of files) {
     let forms: Sexp[]
@@ -178,9 +182,16 @@ async function scanLisp(): Promise<LispScan> {
     // Match the exact path: addon/twist ships its own lisp/sfx.lsp and, being
     // sorted after the core scripts, would otherwise clobber this.
     if (assetId(file) === 'lisp/sfx.lsp') sounds = extractSounds(forms)
+    if (assetId(file) === 'lisp/english.lsp') trainMessages = extractTrainMessages(forms)
   }
 
-  return { tileFiles, characters: [...characters.values()], editorOnlyDrawFuns, sounds }
+  return {
+    tileFiles,
+    characters: [...characters.values()],
+    editorOnlyDrawFuns,
+    sounds,
+    trainMessages,
+  }
 }
 
 /* ------------------------------------------------------------------ */
@@ -774,6 +785,7 @@ async function main() {
     ambient: lisp.sounds.arrays.AMB_SOUNDS ?? [],
     arrays: lisp.sounds.arrays,
   })
+  await writeJSON(join(OUT, 'messages.json'), { train: lisp.trainMessages })
 
   console.log(
     [
@@ -790,6 +802,7 @@ async function main() {
       `  sound effects    : ${sounds} files, ${Object.keys(lisp.sounds.named).length} named` +
         `, ${(lisp.sounds.arrays.AMB_SOUNDS ?? []).filter(Boolean).length}/17 ambient`,
       `  palette tints    : ${Object.keys(tints).length}`,
+      `  train messages   : ${Object.keys(lisp.trainMessages).length}`,
     ].join('\n'),
   )
 }

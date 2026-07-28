@@ -362,6 +362,39 @@ export function expandCharacterTemplates(forms: Sexp[]): CharacterDef[] {
 }
 
 /* ------------------------------------------------------------------ */
+/* localised text                                                      */
+/* ------------------------------------------------------------------ */
+
+/**
+ * The tutorial lines shown by TRAIN_MSG objects, keyed by the message number
+ * the object stores in `aitype`.
+ *
+ * They live in a language file as
+ * `(defun get_train_msg (n) (select n (0 "...") (1 "...") ...))`, so
+ * lisp/english.lsp, lisp/french.lsp and lisp/german.lsp are all readable the
+ * same way.
+ */
+export function extractTrainMessages(forms: Sexp[]): Record<number, string> {
+  const messages: Record<number, string> = {}
+
+  for (const form of walk(forms)) {
+    if (!isSymbol(form[0], 'defun') || !isSymbol(form[1], 'get_train_msg')) continue
+
+    for (const node of walk(form.slice(3))) {
+      if (!isSymbol(node[0], 'select')) continue
+      for (const clause of node.slice(2)) {
+        if (!Array.isArray(clause)) continue
+        if (typeof clause[0] === 'number' && typeof clause[1] === 'string') {
+          messages[clause[0]] = clause[1]
+        }
+      }
+    }
+  }
+
+  return messages
+}
+
+/* ------------------------------------------------------------------ */
 /* sound effects                                                       */
 /* ------------------------------------------------------------------ */
 

@@ -74,6 +74,12 @@ export interface LevelObjectData {
   xacel: number
 }
 
+export interface ImagesManifest {
+  pages: string[]
+  /** [page, x, y, w, h] for atlased images, or a standalone PNG path. */
+  images: Record<string, number[] | string>
+}
+
 export interface LightSource {
   x: number
   y: number

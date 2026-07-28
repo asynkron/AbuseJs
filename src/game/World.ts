@@ -11,6 +11,7 @@ import { TileLayer } from '../render/TileLayer'
 import { Level } from './Level'
 import { Player } from './Player'
 import { spawnProps, type Prop } from './Prop'
+import { TrainMessages } from './TrainMessages'
 import { isBlocked, isGrounded } from './collision'
 
 /** How close the player must stand to an exit portal to use it. */
@@ -62,12 +63,16 @@ export class World {
   /** Set when the player uses an exit; main.ts polls and swaps levels. */
   requestedLevel: string | null = null
 
+  /** Tutorial text overlay, in screen space. */
+  readonly messages: TrainMessages
+
   constructor(
     assets: GameAssets,
     readonly level: Level,
     viewWidth: number,
     viewHeight: number,
     private readonly audio: AudioBank,
+    trainMessages: Record<number, string> = {},
   ) {
     this.bgTiles = new TileLayer(assets, level, 'back')
     this.fgTiles = new TileLayer(assets, level, 'fore', false)
@@ -89,6 +94,7 @@ export class World {
     }
 
     this.ambience = new AmbientSounds(audio, level.objects)
+    this.messages = new TrainMessages(assets, level.objects, trainMessages)
 
     this.camera = new Camera(viewWidth, viewHeight)
 
@@ -129,6 +135,7 @@ export class World {
     // The player is the listener, not the camera - the camera lags behind.
     this.audio.setListener(this.player.x, this.player.y)
     this.ambience.update(this.player.x, this.player.y)
+    this.messages.update(this.player.x, this.player.y)
 
     if (input.state.action) this.checkExits()
   }
@@ -174,6 +181,8 @@ export class World {
     // Renders to its own target, so it has to happen before the main pass.
     const { minLight, lights } = this.level.lighting
     this.lights.update(renderer, lights, minLight, camera.x, camera.y, this.zoom)
+
+    this.messages.layout(viewW, viewH, this.zoom)
   }
 
   /**
@@ -233,6 +242,7 @@ export class World {
    */
   destroy(): void {
     this.lights.destroy()
+    this.messages.destroy()
     this.root.destroy({ children: true })
   }
 

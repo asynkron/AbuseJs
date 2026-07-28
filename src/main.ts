@@ -144,6 +144,9 @@ async function start() {
 
   const soundManifest = (await fetch('assets/sounds.json').then((r) => r.json())) as SoundManifest
   const audio = new AudioBank(soundManifest)
+  const trainMessages = (await fetch('assets/messages.json').then((r) => r.json())) as {
+    train: Record<number, string>
+  }
   // Browsers will not start an AudioContext without a gesture.
   const unlockAudio = () => audio.unlock()
   window.addEventListener('keydown', unlockAudio)
@@ -167,17 +170,18 @@ async function start() {
     const data = await assets.loadLevel(id)
 
     if (world) {
-      app.stage.removeChild(world.root, world.lights.overlay)
+      app.stage.removeChild(world.root, world.lights.overlay, world.messages.container)
       world.destroy()
     }
 
     currentLevelId = id
     level = new Level(data, assets)
-    world = new World(assets, level, viewWidth, viewHeight, audio)
+    world = new World(assets, level, viewWidth, viewHeight, audio, trainMessages.train)
     world.root.scale.set(zoom)
     // The light overlay multiplies over the finished scene, so it sits on top
     // of the world but still inside the stage, and therefore under the CRT.
-    app.stage.addChild(world.root, world.lights.overlay)
+    // Messages go above the lighting - a tutorial line should not be in shadow.
+    app.stage.addChild(world.root, world.lights.overlay, world.messages.container)
     world.resize(viewWidth, viewHeight, zoom)
     if (location.hash.replace(/^#/, '') !== id) history.replaceState(null, '', `#${id}`)
   }

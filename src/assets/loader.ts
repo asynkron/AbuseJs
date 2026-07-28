@@ -3,6 +3,7 @@ import { Assets, Rectangle, Texture } from 'pixi.js'
 import type {
   CharsManifest,
   FrameMeta,
+  ImagesManifest,
   LevelData,
   LevelIndexEntry,
   TileMeta,
@@ -38,36 +39,49 @@ export class GameAssets {
   private constructor(
     readonly tiles: TilesManifest,
     readonly chars: CharsManifest,
+    readonly images: ImagesManifest,
     readonly levels: LevelIndexEntry[],
     private readonly tilePages: { fore: Texture[]; back: Texture[] },
     private readonly charPages: Texture[],
+    private readonly imagePages: Texture[],
   ) {}
 
   private readonly tileCache = new Map<string, Texture>()
   private readonly frameCache = new Map<string, Frame>()
+  private readonly imageCache = new Map<string, Texture | null>()
 
   static async load(onProgress?: (label: string) => void): Promise<GameAssets> {
     onProgress?.('manifests')
-    const [tiles, chars, levels] = await Promise.all([
+    const [tiles, chars, images, levels] = await Promise.all([
       json<TilesManifest>('tiles.json'),
       json<CharsManifest>('chars.json'),
+      json<ImagesManifest>('images.json'),
       json<LevelIndexEntry[]>('levels.json'),
     ])
 
     onProgress?.('textures')
     const loadPages = (pages: string[]) => Promise.all(pages.map((p) => Assets.load<Texture>(`${BASE}/${p}`)))
-    const [forePages, backPages, charPages] = await Promise.all([
+    const [forePages, backPages, charPages, imagePages] = await Promise.all([
       loadPages(tiles.fore.pages),
       loadPages(tiles.back.pages),
       loadPages(chars.pages),
+      loadPages(images.pages),
     ])
 
     // The art is 1995-era pixel art shown at integer zoom - never smooth it.
-    for (const tex of [...forePages, ...backPages, ...charPages]) {
+    for (const tex of [...forePages, ...backPages, ...charPages, ...imagePages]) {
       tex.source.scaleMode = 'nearest'
     }
 
-    return new GameAssets(tiles, chars, levels, { fore: forePages, back: backPages }, charPages)
+    return new GameAssets(
+      tiles,
+      chars,
+      images,
+      levels,
+      { fore: forePages, back: backPages },
+      charPages,
+      imagePages,
+    )
   }
 
   private sub(page: Texture, x: number, y: number, w: number, h: number): Texture {
@@ -151,6 +165,43 @@ export class GameAssets {
   /** True for markers and logic objects that the original only drew in-editor. */
   isEditorOnly(character: string): boolean {
     return this.chars.characters[character]?.editorOnly === true
+  }
+
+  /**
+   * A loose image such as `art/fonts.spe#small_font`. Large ones were written
+   * as standalone PNGs, so this may need a fetch; those resolve to null until
+   * loaded and are only used for full-screen art, not per-frame drawing.
+   */
+  imageTexture(key: string): Texture | null {
+    const cached = this.imageCache.get(key)
+    if (cached !== undefined) return cached
+
+    const meta = this.images.images[key]
+    if (meta === undefined) {
+      this.imageCache.set(key, null)
+      return null
+    }
+
+    if (typeof meta === 'string') {
+      // Standalone page: kick off a load and report it once it lands.
+      this.imageCache.set(key, null)
+      void Assets.load<Texture>(`${BASE}/${meta}`).then((tex) => {
+        tex.source.scaleMode = 'nearest'
+        this.imageCache.set(key, tex)
+      })
+      return null
+    }
+
+    const [p, x, y, w, h] = meta
+    const page = this.imagePages[p]
+    if (!page) {
+      this.imageCache.set(key, null)
+      return null
+    }
+
+    const texture = this.sub(page, x, y, w, h)
+    this.imageCache.set(key, texture)
+    return texture
   }
 
   loadLevel(id: string): Promise<LevelData> {
