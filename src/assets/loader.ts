@@ -111,9 +111,22 @@ export class GameAssets {
     return texture
   }
 
-  /** A single sprite frame, addressed by its source file and entry name. */
-  frame(file: string, name: string): Frame | undefined {
-    const key = `${file}#${name}`
+  /**
+   * The tint variant to draw a character in, given the `aitype` the level
+   * stored on it. Undefined means draw the untinted frames.
+   */
+  tintFor(character: string, aitype: number): number | undefined {
+    const array = this.chars.characters[character]?.tints
+    if (!array) return undefined
+    return this.chars.tintArrays?.[array]?.[aitype] ? aitype : undefined
+  }
+
+  /**
+   * A single sprite frame, addressed by its source file and entry name.
+   * `tintIndex` selects a baked colour variant.
+   */
+  frame(file: string, name: string, tintIndex?: number): Frame | undefined {
+    const key = tintIndex === undefined ? `${file}#${name}` : `${file}@${tintIndex}#${name}`
     const cached = this.frameCache.get(key)
     if (cached) return cached
 
@@ -129,12 +142,14 @@ export class GameAssets {
   }
 
   /** Every frame of one animation state, in order. Empty if unknown. */
-  animation(character: string, state: string): Frame[] {
+  animation(character: string, state: string, tintIndex?: number): Frame[] {
     const def = this.chars.characters[character]
     if (!def) return []
     const names = def.states[state]
     if (!names) return []
-    return names.map((n) => this.frame(def.file, n)).filter((f): f is Frame => f !== undefined)
+    return names
+      .map((n) => this.frame(def.file, n, tintIndex) ?? this.frame(def.file, n))
+      .filter((f): f is Frame => f !== undefined)
   }
 
   hasState(character: string, state: string): boolean {

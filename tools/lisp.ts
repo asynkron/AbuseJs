@@ -362,6 +362,43 @@ export function expandCharacterTemplates(forms: Sexp[]): CharacterDef[] {
 }
 
 /* ------------------------------------------------------------------ */
+/* palette tints                                                       */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Arrays of tint palettes, such as
+ * `(setq ant_tints (make-array 13 :initial-contents (list (def_tint "art/tints/ant/green.spe") ...)))`.
+ *
+ * A character indexes one of these with its `aitype` to pick a colour variant
+ * (lisp/ant.lsp, `(draw_tint (aref ant_tints (aitype)))`). Entries that are
+ * not a `def_tint` - `normal_tint` and friends - come back as null, meaning
+ * "draw untinted".
+ */
+export function extractTintArrays(forms: Sexp[]): Record<string, (string | null)[]> {
+  const arrays: Record<string, (string | null)[]> = {}
+
+  for (const form of walk(forms)) {
+    if (!isSymbol(form[0], 'setq') || !isSymbol(form[1])) continue
+    const value = form[2]
+    if (!Array.isArray(value) || !isSymbol(value[0], 'make-array')) continue
+
+    const list = value.find((v) => Array.isArray(v) && isSymbol(v[0], 'list')) as Sexp[] | undefined
+    if (!list) continue
+
+    const entries = list.slice(1).map((entry) => {
+      if (Array.isArray(entry) && isSymbol(entry[0], 'def_tint') && typeof entry[1] === 'string') {
+        return entry[1]
+      }
+      return null
+    })
+
+    if (entries.some((e) => e !== null)) arrays[form[1].name] = entries
+  }
+
+  return arrays
+}
+
+/* ------------------------------------------------------------------ */
 /* localised text                                                      */
 /* ------------------------------------------------------------------ */
 

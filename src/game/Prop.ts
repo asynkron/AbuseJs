@@ -22,9 +22,14 @@ export class Prop extends Entity {
     super(assets, data.type)
     this.setPosition(data.x, data.y)
     this.direction = data.direction < 0 ? -1 : 1
+
+    // Colour variants: ants and the like index a tint array with their aitype.
+    this.tintIndex = assets.tintFor(data.type, data.aitype)
+
     // Levels record the state name each object was saved in; fall back when
     // that state no longer exists in the current scripts.
-    if (assets.hasState(data.type, data.state)) this.setState(data.state)
+    const state = assets.hasState(data.type, data.state) ? data.state : assets.defaultState(data.type)
+    this.setState(state, true)
   }
 
   advance(dt: number): void {

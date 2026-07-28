@@ -3,10 +3,10 @@
 A web game built on the art, levels and sounds of **Abuse** (Crack dot Com, 1995), with our own
 game mechanics. Rendering is PixiJS v8 (WebGL/WebGPU); everything else is ours.
 
-Current state: a real Abuse level loads, renders with parallax and foreground overlays, and the
-cop can be walked and jumped around it. Combat, AI and weapons are not implemented yet — but the
-asset pipeline already converts every monster, weapon, tileset and sound effect, so that work is
-pure gameplay code.
+Current state: real Abuse levels load with their lighting, tile layers, objects, ambience and
+tutorial text; the cop runs, jumps, climbs ramps and walks between levels through the original exit
+portals. Combat, AI and weapons are deliberately not implemented — those are the mechanics this
+project is writing itself. Everything the original shipped is converted and waiting for them.
 
 ```bash
 npm install
@@ -15,7 +15,8 @@ npm run dev      # http://localhost:5173
 ```
 
 Controls: **arrows/WASD** move, **space** jump, **shift** run, **mouse** aims the torso,
-**V** toggles the CRT filter, **L** toggles level lighting.
+**E** use an exit portal, **V** toggles the CRT filter, **L** toggles level lighting.
+Sound starts muted — there is a volume slider top right.
 Append a level id to the URL to load it, e.g. `#levels/level14` — any id in `public/assets/levels.json`.
 
 ## Layout
@@ -41,11 +42,12 @@ src/
 
 | Output | Contents |
 | --- | --- |
-| `tiles.json` + `tiles/*.png` | 1109 foreground and 405 background tiles in grid atlases |
-| `chars.json` + `chars/*.png` | 2309 sprite frames and 271 character animation sets, one 2048² page |
+| `tiles.json` + `tiles/*.png` | 1109 foreground (189 with ramp outlines) and 405 background tiles |
+| `chars.json` + `chars/*.png` | 3849 sprite frames — 2309 plus 1540 baked colour variants — and 271 characters, one 2048² page |
 | `images.json` + `images/*.png` | 442 loose images (HUD, fonts, title screens) |
 | `levels.json` + `levels/*.json` | 125 levels: both tile grids, the typed object list, 5617 light sources |
-| `sfx/*.wav` + `sfx.json` | 133 sound effects (8-bit mono 11 kHz PCM, plays as-is) |
+| `sounds.json` + `sfx/*.wav` | 133 samples, 53 named, the 17-entry ambient table |
+| `messages.json` | The 12 tutorial lines TRAIN_MSG markers show |
 | `palette.json` | The 256-colour palette plus 25 tint tables |
 
 ## Format notes
@@ -68,6 +70,15 @@ live next to the code that uses them; the highlights:
   it was saved, so spawn points and monster placements survive without a hardcoded id table.
 - **Sprites anchor from the feet**: blit at `x - xcfg`, `y - height + 1`, mirrored from the opposite
   edge when facing left.
+- **A tile is solid exactly when it carries a collision outline**, and that outline is a polygon,
+  not a box — 189 tiles are ramps. The converter rasterises each into one solid span per pixel
+  column.
+- **Objects that carry art are not always visible.** Markers, logic gates and ambient sound
+  emitters draw only in the editor, which the converter detects from their draw function.
+- **Levels reuse physics fields as configuration.** AMBIENT_SOUND keeps its repeat delay in `xvel`,
+  volume in `yvel`, spread in `xacel`; NEXT_LEVEL keeps its destination level number in `aistate`.
+- **Tints are just palettes.** A colour variant is the same sprite indices decoded against a
+  different 256-colour table, so variants are baked at conversion time and are exact.
 - **Animations are not in the art files.** They are `def_char` forms in the `.lsp` scripts, using
   `seq`/`rep`/`app` over frame names. Some — including the player's aiming torso — are only produced
   by helper functions, so the reader expands those templates too.
@@ -132,10 +143,21 @@ solid rectangle that overrides everything beneath it — occurs 3 times in 125 l
 
 ## Not done yet
 
-- **Slopes** collide as their bounding box (see above).
-- **Tints** — palette remaps for enemy colour variants — are exported but not applied.
-- **Music** (`.hmi`) is copied but not converted.
-- Tile animation (`next`) and per-frame root motion (`advance`) are exported but not driven.
+- **Mechanics.** No combat, AI, weapons, damage or pickups — by design. Level objects are spawned
+  and animated but inert; they are scenery for mechanics that do not exist yet.
+- **Music** (`.hmi`) is copied but not converted. It is HMI MIDI and needs either a converter plus
+  a JS synth using the two shipped soundfonts, or offline transcoding with tooling this machine
+  does not have.
+- **The real HUD.** `art/statbar.spe` and `art/status.spe` are converted and the bitmap font
+  renders; there is nothing to put in them until there are stats.
+- **Tints beyond the ants.** The cop and gun tint sets exist but are not baked — add them to
+  `TINTED_SHEETS` in `tools/convert.ts`.
+- Per-frame root motion (`advance`) is exported but not driven.
+
+### Things that turned out not to exist
+
+- **Tile animation.** The `next` field is 0 on all 1109 foreground and 405 background tiles, and
+  the engine never reads it. Animated lava, teleporters and screens are objects, not tiles.
 
 ## Licensing
 

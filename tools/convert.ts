@@ -34,6 +34,7 @@ import {
   expandCharacterTemplates,
   extractEditorOnlyDrawFuns,
   extractSounds,
+  extractTintArrays,
   extractTrainMessages,
   isSymbol,
   walk,
@@ -110,6 +111,23 @@ async function loadPalette(): Promise<Buffer> {
   return pal.rgb
 }
 
+/** Reads a tint file's 256-colour palette, or null if it is not usable. */
+async function readTintPalette(relativePath: string): Promise<Buffer | null> {
+  const path = join(SRC, relativePath)
+  if (!existsSync(path)) return null
+  try {
+    const buf = await readFile(path)
+    if (!isSpecFile(buf)) return null
+    const spec = readSpecFile(buf)
+    const entry = spec.entries.find((e) => e.type === SpecType.PALETTE)
+    if (!entry) return null
+    const pal = readPalette(buf, entry.offset)
+    return pal.count === 256 ? pal.rgb : null
+  } catch {
+    return null
+  }
+}
+
 async function collectTints(): Promise<Record<string, number[]>> {
   const tints: Record<string, number[]> = {}
   const dir = join(SRC, 'art/tints')
@@ -141,6 +159,8 @@ interface LispScan {
   sounds: SoundTable
   /** TRAIN_MSG tutorial lines, keyed by message number. */
   trainMessages: Record<number, string>
+  /** Named tint arrays a character indexes with its `aitype`. */
+  tintArrays: Record<string, (string | null)[]>
 }
 
 async function scanLisp(): Promise<LispScan> {
@@ -158,6 +178,7 @@ async function scanLisp(): Promise<LispScan> {
   const editorOnlyDrawFuns = new Set<string>(['dev_draw'])
   let sounds: SoundTable = { named: {}, arrays: {} }
   let trainMessages: Record<number, string> = {}
+  const tintArrays: Record<string, (string | null)[]> = {}
 
   for (const file of files) {
     let forms: Sexp[]
@@ -183,6 +204,7 @@ async function scanLisp(): Promise<LispScan> {
     // sorted after the core scripts, would otherwise clobber this.
     if (assetId(file) === 'lisp/sfx.lsp') sounds = extractSounds(forms)
     if (assetId(file) === 'lisp/english.lsp') trainMessages = extractTrainMessages(forms)
+    Object.assign(tintArrays, extractTintArrays(forms))
   }
 
   return {
@@ -191,6 +213,7 @@ async function scanLisp(): Promise<LispScan> {
     editorOnlyDrawFuns,
     sounds,
     trainMessages,
+    tintArrays,
   }
 }
 
@@ -407,10 +430,30 @@ async function convertTiles(palette: Buffer, tileFiles: string[]) {
 /* characters + loose images                                           */
 /* ------------------------------------------------------------------ */
 
+/**
+ * Which sprite sheets get colour variants baked, and from which tint array.
+ *
+ * A tint is just another 256-colour palette, and at this point we still have
+ * the original palette indices - so a variant is the same decode against a
+ * different palette, exact rather than approximated. Doing it here avoids
+ * needing indexed textures and a lookup shader at runtime.
+ *
+ * Only the ant sheet is worth it so far: levels place up to 69 ants each and
+ * pick the colour with `aitype`. 140 frames x 11 tints is under a megapixel.
+ */
+const TINTED_SHEETS: { file: string; array: string }[] = [{ file: 'art/ant.spe', array: 'ant_tints' }]
+
+/** Frame key for a tinted variant, e.g. `art/ant.spe@3#awlk0001.pcx`. */
+function tintedKey(file: string, tintIndex: number, name: string): string {
+  return `${file}@${tintIndex}#${name}`
+}
+
 async function convertSprites(
   palette: Buffer,
   characters: CharacterDef[],
   editorOnlyDrawFuns: Set<string>,
+  tintArrays: Record<string, (string | null)[]>,
+  tintPalettes: Record<string, Buffer>,
 ) {
   const specFiles = await listFiles(SRC, '.spe')
 
@@ -418,6 +461,8 @@ async function convertSprites(
   const frameExtra = new Map<string, { xcfg: number; advance: number; hitDamage: number }>()
   const imageInputs: PackInput[] = []
   const standalone: { key: string; file: string; width: number; height: number; rgba: Buffer }[] = []
+  /** Tint array name -> the indices we actually produced variants for. */
+  const bakedTints = new Map<string, Set<number>>()
 
   for (const path of specFiles) {
     const buf = await readFile(path)
@@ -454,6 +499,37 @@ async function convertSprites(
             rgba: toRGBA(fig.image, palette, true),
           })
           frameExtra.set(key, { xcfg: fig.xcfg, advance: fig.advance, hitDamage: fig.hitDamage })
+
+          // Colour variants: the same indices decoded against a tint palette.
+          const tinted = TINTED_SHEETS.find((t) => t.file === id)
+          if (tinted) {
+            const entries = tintArrays[tinted.array] ?? []
+            entries.forEach((tintFile, index) => {
+              if (!tintFile) return
+              const tintPalette = tintPalettes[tintFile]
+              if (!tintPalette) return
+
+              const variantKey = tintedKey(id, index, entry.name)
+              frameInputs.push({
+                key: variantKey,
+                width: fig.image.width,
+                height: fig.image.height,
+                rgba: toRGBA(fig.image, tintPalette, true),
+              })
+              frameExtra.set(variantKey, {
+                xcfg: fig.xcfg,
+                advance: fig.advance,
+                hitDamage: fig.hitDamage,
+              })
+
+              let baked = bakedTints.get(tinted.array)
+              if (!baked) {
+                baked = new Set()
+                bakedTints.set(tinted.array, baked)
+              }
+              baked.add(index)
+            })
+          }
         } else {
           const img = readImage(buf, entry.offset)
           if (img.width === 0 || img.height === 0) continue
@@ -507,7 +583,13 @@ async function convertSprites(
 
   const characterTable: Record<
     string,
-    { file: string; range?: [number, number]; states: Record<string, string[]>; editorOnly?: true }
+    {
+      file: string
+      range?: [number, number]
+      states: Record<string, string[]>
+      editorOnly?: true
+      tints?: string
+    }
   > = {}
   let unresolved = 0
   let editorOnly = 0
@@ -521,11 +603,13 @@ async function convertSprites(
     if (Object.keys(states).length) {
       const hidden = c.drawFun !== undefined && editorOnlyDrawFuns.has(c.drawFun)
       if (hidden) editorOnly++
+      const tinted = TINTED_SHEETS.find((t) => t.file === c.file)
       characterTable[c.name] = {
         file: c.file,
         ...(c.range ? { range: c.range } : {}),
         states,
         ...(hidden ? { editorOnly: true as const } : {}),
+        ...(tinted ? { tints: tinted.array } : {}),
       }
     }
   }
@@ -534,6 +618,17 @@ async function convertSprites(
     pages: frames.pages,
     frames: frameTable,
     characters: characterTable,
+    // Which array indices actually have baked variants. Recorded while baking
+    // rather than read back from the lisp, because an entry can name a tint
+    // file we could not load - the fRaBs ant array points at three.
+    tintArrays: Object.fromEntries(
+      TINTED_SHEETS.map((t) => [
+        t.array,
+        (tintArrays[t.array] ?? []).map((_entry, index) =>
+          bakedTints.get(t.array)?.has(index) ? 1 : null,
+        ),
+      ]),
+    ),
   })
   await writeJSON(join(OUT, 'images.json'), { pages: images.pages, images: imageTable })
 
@@ -773,7 +868,23 @@ async function main() {
   const tiles = await convertTiles(palette, lisp.tileFiles)
 
   console.log(`converting sprites (${lisp.characters.length} character definitions)...`)
-  const sprites = await convertSprites(palette, lisp.characters, lisp.editorOnlyDrawFuns)
+  // Keyed by the path the scripts reference, so tints living outside
+  // art/tints (the fRaBs addons ship their own) resolve too.
+  const tintPalettes: Record<string, Buffer> = {}
+  for (const entries of Object.values(lisp.tintArrays)) {
+    for (const path of entries) {
+      if (!path || tintPalettes[path]) continue
+      const rgb = await readTintPalette(path)
+      if (rgb) tintPalettes[path] = rgb
+    }
+  }
+  const sprites = await convertSprites(
+    palette,
+    lisp.characters,
+    lisp.editorOnlyDrawFuns,
+    lisp.tintArrays,
+    tintPalettes,
+  )
 
   console.log('converting levels...')
   const levels = await convertLevels()

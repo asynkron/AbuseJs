@@ -30,6 +30,8 @@ export class Entity implements Body {
   prevY = 0
 
   state = 'stopped'
+  /** Baked colour variant to draw, when this character has any. */
+  protected tintIndex: number | undefined
   private frames: Frame[] = []
   private frameIndex = 0
   private frameClock = 0
@@ -50,7 +52,7 @@ export class Entity implements Body {
   /** Switches animation, restarting it unless we are already in that state. */
   setState(state: string, restart = false): void {
     if (this.state === state && !restart && this.frames.length) return
-    const frames = this.assets.animation(this.character, state)
+    const frames = this.assets.animation(this.character, state, this.tintIndex)
     if (!frames.length) return
     this.state = state
     this.frames = frames

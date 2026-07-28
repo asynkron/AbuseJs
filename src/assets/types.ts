@@ -47,12 +47,19 @@ export interface CharacterManifest {
    * emitters and the like. Invisible while playing.
    */
   editorOnly?: boolean
+  /**
+   * Name of the tint array this character indexes with its `aitype` to pick a
+   * colour variant, e.g. `ant_tints`.
+   */
+  tints?: string
 }
 
 export interface CharsManifest {
   pages: string[]
   frames: Record<string, FrameMeta>
   characters: Record<string, CharacterManifest>
+  /** Per tint array, which indices have baked variants (1) and which do not. */
+  tintArrays: Record<string, (number | null)[]>
 }
 
 export interface LevelObjectData {
