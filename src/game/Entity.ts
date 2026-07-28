@@ -75,7 +75,21 @@ export class Entity implements Body {
     while (this.frameClock >= 1) {
       this.frameClock -= 1
       this.frameIndex = (this.frameIndex + 1) % this.frames.length
+
+      // Some walk cycles bake their movement into the frames rather than into
+      // a velocity - JUGGER, T_REX and DROID all do (src/objects.cpp,
+      // game_object::frame_advance). Apply it in the facing direction.
+      const advance = this.frames[this.frameIndex]?.advance
+      if (advance) this.applyRootMotion(advance * this.direction)
     }
+  }
+
+  /**
+   * Moves the entity by a frame's baked-in displacement. The base version just
+   * translates; anything that collides should override.
+   */
+  protected applyRootMotion(dx: number): void {
+    this.x += dx
   }
 
   /** Positions the sprite for this render pass. `alpha` interpolates the tick. */

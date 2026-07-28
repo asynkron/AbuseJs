@@ -149,6 +149,11 @@ export class Player extends Entity {
     }
   }
 
+  /** Root motion has to respect walls like any other movement. */
+  protected override applyRootMotion(dx: number): void {
+    moveAndCollide(this.level, this, dx, 0)
+  }
+
   override draw(alpha: number): void {
     super.draw(alpha)
     this.drawTop(alpha)

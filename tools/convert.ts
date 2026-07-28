@@ -438,10 +438,17 @@ async function convertTiles(palette: Buffer, tileFiles: string[]) {
  * different palette, exact rather than approximated. Doing it here avoids
  * needing indexed textures and a lookup shader at runtime.
  *
- * Only the ant sheet is worth it so far: levels place up to 69 ants each and
- * pick the colour with `aitype`. 140 frames x 11 tints is under a megapixel.
+ * Each character indexes its array with `aitype`:
+ *   ants   - lisp/ant.lsp,    (draw_tint (aref ant_tints (aitype)))
+ *   guns   - lisp/guns.lsp,   (draw_tint (aref gun_tints (aitype)))
+ *   player - lisp/people.lsp, player_tints, for per-player colours
  */
-const TINTED_SHEETS: { file: string; array: string }[] = [{ file: 'art/ant.spe', array: 'ant_tints' }]
+const TINTED_SHEETS: { file: string; array: string }[] = [
+  { file: 'art/ant.spe', array: 'ant_tints' },
+  { file: 'art/gun2.spe', array: 'gun_tints' },
+  { file: 'art/cop.spe', array: 'player_tints' },
+  { file: 'art/coptop.spe', array: 'player_tints' },
+]
 
 /** Frame key for a tinted variant, e.g. `art/ant.spe@3#awlk0001.pcx`. */
 function tintedKey(file: string, tintIndex: number, name: string): string {
