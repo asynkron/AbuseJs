@@ -43,7 +43,8 @@ import {
   type SoundTable,
 } from './lisp.js'
 import { packGrid, packShelves, writePage, type PackInput } from './atlas.js'
-import { hmiToMidi } from './hmi.js'
+import { hmiToMidi, scanMidiPrograms } from './hmi.js'
+import { readSoundFont } from './sf2.js'
 
 const SRC = 'assets/original'
 const OUT = 'public/assets'
@@ -850,6 +851,7 @@ async function convertMusic() {
   await mkdir(join(OUT, 'music'), { recursive: true })
 
   const tracks: { id: string; file: string; bytes: number }[] = []
+  const usedPrograms = new Set<string>()
   for (const file of files) {
     const buf = await readFile(file)
     let midi: Buffer | null = null
@@ -864,11 +866,41 @@ async function convertMusic() {
     const out = `music/${id}.mid`
     await writeFileRaw(join(OUT, out), midi)
     tracks.push({ id, file: out, bytes: midi.length })
+    for (const program of scanMidiPrograms(midi)) usedPrograms.add(program)
   }
 
   tracks.sort((a, b) => a.id.localeCompare(b.id))
   await writeJSON(join(OUT, 'music.json'), tracks)
-  return tracks.length
+
+  const soundfont = await extractSoundFont(usedPrograms)
+  return { tracks: tracks.length, ...soundfont }
+}
+
+/**
+ * Lifts just the patches the soundtrack plays out of the shipped SC-55
+ * soundfont, so the browser gets the real instruments without a 3MB download
+ * of everything.
+ */
+async function extractSoundFont(wanted: Set<string>) {
+  const path = join(SRC, 'soundfonts/Roland SC-55 Presets.sf2')
+  if (!existsSync(path) || wanted.size === 0) return { presets: 0, samples: 0, pcmBytes: 0 }
+
+  let result: ReturnType<typeof readSoundFont> = null
+  try {
+    result = readSoundFont(await readFile(path), wanted)
+  } catch (err) {
+    console.warn(`  ! soundfont: ${(err as Error).message}`)
+  }
+  if (!result) return { presets: 0, samples: 0, pcmBytes: 0 }
+
+  await writeFileRaw(join(OUT, 'music/samples.bin'), result.pcm)
+  await writeJSON(join(OUT, 'music/soundfont.json'), {
+    presets: result.presets,
+    samples: result.samples,
+    missing: [...wanted].filter((k) => !result.presets[k]).sort(),
+  })
+
+  return { presets: Object.keys(result.presets).length, samples: result.samples.length, pcmBytes: result.pcm.length }
 }
 
 async function copySounds() {
@@ -954,7 +986,8 @@ async function main() {
         `, ${(lisp.sounds.arrays.AMB_SOUNDS ?? []).filter(Boolean).length}/17 ambient`,
       `  palette tints    : ${Object.keys(tints).length}`,
       `  train messages   : ${Object.keys(lisp.trainMessages).length}`,
-      `  music tracks     : ${music} (HMI -> MIDI)`,
+      `  music tracks     : ${music.tracks} (HMI -> MIDI)`,
+      `  soundfont        : ${music.presets} presets, ${music.samples} samples, ${(music.pcmBytes / 1e6).toFixed(1)}MB PCM`,
     ].join('\n'),
   )
 }

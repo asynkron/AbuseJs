@@ -150,20 +150,23 @@ queued and emitted at the right delta), and an undocumented `0xFE` event that ge
 and division are fixed exactly as the engine writes them. All 14 convert: 21601 notes, zero parse
 errors on read-back.
 
-`src/audio/MusicPlayer.ts` schedules the result through WebAudio with the usual lookahead. **It
-synthesises the notes rather than sampling the shipped soundfont** — one oscillator per voice with
-the waveform chosen from the General MIDI program family, plus noise bursts for percussion. That is
-the real composition with a substitute voice; a proper SF2 sampler is a much larger job than the
-music warranted. The two soundfonts are still in `assets/original/soundfonts/` for whoever wants to.
+`tools/sf2.ts` then lifts the patches those tracks actually play out of the shipped
+**Roland SC-55 soundfont** — resolving preset → preset zone → instrument → instrument zone → sample
+and keeping only the generators that matter for straightforward playback. All 41 patches the music
+uses resolve, giving 137 samples and 1.2MB of PCM instead of the full 3.1MB font.
 
-Levels map to tracks by name (`levelNN` → `abuseNN`) and fall back to a stable hash.
+`src/audio/MusicPlayer.ts` schedules the MIDI through WebAudio with the usual lookahead and plays
+each note from its SC-55 sample, pitched by root key and tuning, honouring loop points and
+release. If the soundfont fails to load it falls back to an oscillator synth so the music still
+plays with substitute timbres.
+
+Levels map to tracks by name (`levelNN` → `abuseNN`) and fall back to a stable hash. Everything
+here obeys the mute gate — a muted page loads no music at all.
 
 ## Not done yet
 
 - **Mechanics.** No combat, AI, weapons, damage or pickups — by design. Level objects are spawned
   and animated but inert; they are scenery for mechanics that do not exist yet.
-- **Music timbres.** The 14 tracks are converted and play, but through a synthesised voice rather
-  than the Roland SC-55 soundfont the original uses — see below.
 - **Status bar contents.** The panel and health are real; weapon slots and ammo counts stay empty
   until there are weapons to hold.
 

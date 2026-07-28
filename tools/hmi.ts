@@ -148,6 +148,76 @@ function convertTrack(buf: Buffer, start: number, size: number): number[] {
   return chunk.concat(events)
 }
 
+/**
+ * Which `bank:program` patches a MIDI file plays, so only those need lifting
+ * out of the soundfont. Channel 10 is percussion, which lives in bank 128 by
+ * convention.
+ */
+export function scanMidiPrograms(buf: Buffer): Set<string> {
+  const used = new Set<string>()
+  if (buf.length < 14 || buf.toString('latin1', 0, 4) !== 'MThd') return used
+
+  const programs = new Uint8Array(16)
+  let p = 8 + buf.readUInt32BE(4)
+
+  while (p + 8 <= buf.length) {
+    const isTrack = buf.toString('latin1', p, p + 4) === 'MTrk'
+    const length = buf.readUInt32BE(p + 4)
+    const start = p + 8
+    const end = Math.min(start + length, buf.length)
+    p = start + length
+    if (!isTrack) continue
+
+    let i = start
+    let running = 0
+
+    while (i < end) {
+      while (i < end && buf[i] & 0x80) i++ // delta time
+      i++
+      if (i >= end) break
+
+      let status = buf[i]
+      if (status < 0x80) {
+        if (!running) break
+        status = running
+      } else {
+        i++
+        running = status
+      }
+
+      if (status === 0xff) {
+        i++ // meta type
+        let metaLength = 0
+        while (i < end) {
+          const c = buf[i++]
+          metaLength = (metaLength << 7) | (c & 0x7f)
+          if (!(c & 0x80)) break
+        }
+        i += metaLength
+        continue
+      }
+
+      const channel = status & 0x0f
+      const high = status & 0xf0
+      if (high === 0xc0) {
+        programs[channel] = buf[i]
+        used.add(`${channel === 9 ? 128 : 0}:${buf[i]}`)
+        i += 1
+      } else if (high === 0xd0) {
+        i += 1
+      } else if (high === 0x90 && buf[i + 1] > 0) {
+        // A channel can play before any program change; that is program 0.
+        used.add(`${channel === 9 ? 128 : 0}:${programs[channel]}`)
+        i += 2
+      } else {
+        i += 2
+      }
+    }
+  }
+
+  return used
+}
+
 /** Returns a standard MIDI file, or null if the input is not usable HMI. */
 export function hmiToMidi(buf: Buffer): Buffer | null {
   if (buf.length < HMI_NEXT_CHUNK_POS + 4) return null

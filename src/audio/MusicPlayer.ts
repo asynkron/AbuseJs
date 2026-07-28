@@ -1,15 +1,15 @@
 import type { AudioBank } from './AudioBank'
+import { SoundFont, type Voice } from './SoundFont'
 
 /**
  * Plays Abuse's soundtrack, converted from HMI to standard MIDI at build time
  * (see tools/hmi.ts).
  *
- * The original renders these through a Roland SC-55 soundfont. Shipping a
- * 3MB SF2 and writing a sampler for it is a much bigger job than the music
- * warrants right now, so this synthesises the note data directly: one
- * oscillator voice per note, waveform chosen from the General MIDI program
- * family, plus a noise burst for the percussion channel. It plays the real
- * composition with a substitute voice, not the original timbres.
+ * Notes play through the SC-55 patches lifted out of the shipped soundfont at
+ * build time. If that fails to load, playback falls back to a plain oscillator
+ * synth - one voice per note with the waveform picked from the General MIDI
+ * program family, plus noise bursts for percussion - so the music still plays,
+ * just with substitute timbres.
  *
  * Scheduling uses the standard lookahead pattern - a coarse timer that pushes
  * events into WebAudio's sample-accurate clock a fraction of a second ahead.
@@ -144,6 +144,9 @@ export class MusicPlayer {
   private readonly programs = new Uint8Array(16)
   /** Currently sounding voices, so a note-off can release them. */
   private readonly voices = new Map<number, { osc: OscillatorNode; gain: GainNode }>()
+  /** Sampled voices, when the soundfont is available. */
+  private readonly sampled = new Map<number, Voice>()
+  private readonly soundfont = new SoundFont()
 
   private currentTrack: string | null = null
 
@@ -158,6 +161,11 @@ export class MusicPlayer {
 
   get track(): string | null {
     return this.currentTrack
+  }
+
+  /** True when playing the real SC-55 patches rather than the fallback synth. */
+  get sampledVoices(): boolean {
+    return this.soundfont.loaded
   }
 
   /** Loads and starts a track, looping it. Silently does nothing while muted. */
@@ -186,6 +194,8 @@ export class MusicPlayer {
 
     this.bus = this.audio.createBus(0.35)
     if (!this.noise) this.noise = this.makeNoiseBuffer(context)
+    // Real patches if they load; the oscillator synth covers the gap if not.
+    await this.soundfont.load(this.base)
 
     this.startTime = context.currentTime + 0.1
     this.timer = window.setInterval(() => this.schedule(), SCHEDULE_INTERVAL_MS)
@@ -205,6 +215,14 @@ export class MusicPlayer {
       }
     }
     this.voices.clear()
+    for (const voice of this.sampled.values()) {
+      try {
+        voice.source.stop()
+      } catch {
+        // Already stopped.
+      }
+    }
+    this.sampled.clear()
     this.bus?.disconnect()
     this.bus = null
     this.currentTrack = null
@@ -260,6 +278,26 @@ export class MusicPlayer {
     if (high !== 0x90) return
 
     this.release(key, time)
+
+    if (this.soundfont.loaded) {
+      const context = this.audio.context_
+      if (context && this.bus) {
+        const voice = this.soundfont.noteOn(
+          context,
+          this.bus,
+          channel === DRUM_CHANNEL ? 128 : 0,
+          this.programs[channel],
+          event.data1,
+          event.data2,
+          time,
+        )
+        if (voice) {
+          this.sampled.set(key, voice)
+          return
+        }
+      }
+    }
+
     const voice = channel === DRUM_CHANNEL ? this.startDrum(time, event) : this.startNote(time, event, channel)
     if (voice) this.voices.set(key, voice)
   }
@@ -310,6 +348,20 @@ export class MusicPlayer {
   }
 
   private release(key: number, time: number): void {
+    const sampled = this.sampled.get(key)
+    if (sampled) {
+      this.sampled.delete(key)
+      try {
+        const end = time + Math.max(0.05, sampled.release)
+        sampled.gain.gain.cancelScheduledValues(time)
+        sampled.gain.gain.setValueAtTime(Math.max(sampled.gain.gain.value, 0.0001), time)
+        sampled.gain.gain.exponentialRampToValueAtTime(0.0001, end)
+        sampled.source.stop(end + 0.02)
+      } catch {
+        // Already stopped.
+      }
+    }
+
     const voice = this.voices.get(key)
     if (!voice) return
     this.voices.delete(key)
