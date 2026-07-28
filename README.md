@@ -154,6 +154,12 @@ solid rectangle that overrides everything beneath it — occurs 3 times in 125 l
   `TINTED_SHEETS` in `tools/convert.ts`.
 - Per-frame root motion (`advance`) is exported but not driven.
 
+- **18 addon levels reference tiles that were never shipped** — mostly `addon/claudio/*` and
+  `addon/pong/*`, plus a dozen stray cells in `levels/frabs18` and `levels/frabs30`. `abuse.lsp`
+  says as much: claudio's palettes "can only be used with the art files by other authors". Unknown
+  tiles are skipped rather than drawn, so those levels load with holes. All 22 core
+  `levels/levelNN` are clean.
+
 ### Things that turned out not to exist
 
 - **Tile animation.** The `next` field is 0 on all 1109 foreground and 405 background tiles, and
