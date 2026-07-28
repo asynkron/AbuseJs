@@ -169,7 +169,6 @@ here obeys the mute gate — a muted page loads no music at all.
   and animated but inert; they are scenery for mechanics that do not exist yet.
 - **Status bar contents.** The panel and health are real; weapon slots and ammo counts stay empty
   until there are weapons to hold.
-
 - **18 addon levels reference tiles that were never shipped** — mostly `addon/claudio/*` and
   `addon/pong/*`, plus a dozen stray cells in `levels/frabs18` and `levels/frabs30`. `abuse.lsp`
   says as much: claudio's palettes "can only be used with the art files by other authors". Unknown
