@@ -201,7 +201,7 @@ async function start() {
             `${world.player.onGround ? '' : ' (air)'}  x${zoom}  ${fps}fps  ${world.spriteCount} sprites` +
             `  ${world.lights.visibleCount}/${level.lighting.lights.length} lights` +
             ` @ambient ${level.lighting.minLight}/63`,
-          `objects: ${world.objectSummary}`,
+          `props ${world.propCounts.visible}/${world.propCounts.total} drawn   ${world.objectSummary}`,
           `arrows/WASD move   space jump   shift run` +
             `   V crt:${crtEnabled ? 'on' : 'off'}   L light:${world.lights.enabled ? 'on' : 'off'}`,
         ].join('\n')

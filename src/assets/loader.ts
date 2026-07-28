@@ -127,6 +127,32 @@ export class GameAssets {
     return this.chars.characters[character]?.states[state] !== undefined
   }
 
+  character(name: string) {
+    return this.chars.characters[name]
+  }
+
+  /** Every state this character defines, in declaration order. */
+  states(character: string): string[] {
+    const def = this.chars.characters[character]
+    return def ? Object.keys(def.states) : []
+  }
+
+  /**
+   * The state to show an object in when nothing better is known. Prefers
+   * `stopped`, which nearly every character defines, and otherwise takes
+   * whatever it has.
+   */
+  defaultState(character: string): string {
+    const states = this.states(character)
+    if (states.includes('stopped')) return 'stopped'
+    return states[0] ?? 'stopped'
+  }
+
+  /** True for markers and logic objects that the original only drew in-editor. */
+  isEditorOnly(character: string): boolean {
+    return this.chars.characters[character]?.editorOnly === true
+  }
+
   loadLevel(id: string): Promise<LevelData> {
     return json<LevelData>(`levels/${levelFileName(id)}`)
   }

@@ -3,10 +3,12 @@ import { Container, type Renderer } from 'pixi.js'
 import type { GameAssets } from '../assets/loader'
 import { Camera } from '../core/camera'
 import type { Input } from '../core/input'
+import { TICK_HZ } from '../core/loop'
 import { LightLayer } from '../render/LightLayer'
 import { TileLayer } from '../render/TileLayer'
 import { Level } from './Level'
 import { Player } from './Player'
+import { spawnProps, type Prop } from './Prop'
 import { isBlocked, isGrounded } from './collision'
 
 /**
@@ -21,7 +23,12 @@ export class World {
 
   private readonly backdrop = new Container()
   private readonly scene = new Container()
+  private readonly propLayer = new Container()
   private readonly entityLayer = new Container()
+
+  /** Level objects, drawn behind the player. */
+  private readonly props: Prop[]
+  private visibleProps = 0
 
   private readonly bgTiles: TileLayer
   private readonly fgTiles: TileLayer
@@ -47,8 +54,16 @@ export class World {
     this.aboveTiles = new TileLayer(assets, level, 'fore', true)
 
     this.backdrop.addChild(this.bgTiles.container)
-    this.scene.addChild(this.fgTiles.container, this.entityLayer, this.aboveTiles.container)
+    this.scene.addChild(
+      this.fgTiles.container,
+      this.propLayer,
+      this.entityLayer,
+      this.aboveTiles.container,
+    )
     this.root.addChild(this.backdrop, this.scene)
+
+    this.props = spawnProps(assets, level.objects)
+    for (const prop of this.props) this.propLayer.addChild(prop.sprite)
 
     this.camera = new Camera(viewWidth, viewHeight)
 
@@ -100,6 +115,7 @@ export class World {
     this.fgTiles.update(camera.x, camera.y, viewW, viewH)
     this.aboveTiles.update(camera.x, camera.y, viewW, viewH)
 
+    this.updateProps(camera.x, camera.y, viewW, viewH, alpha)
     this.player.draw(alpha)
 
     // Layers are placed in world space; the containers carry the camera offset.
@@ -111,8 +127,50 @@ export class World {
     this.lights.update(renderer, lights, minLight, camera.x, camera.y, this.zoom)
   }
 
+  /**
+   * Animates and draws the level objects in view. Off-screen props are hidden
+   * and left un-animated - nothing observes them, so nothing is lost, and a
+   * big level can hold several hundred.
+   */
+  private updateProps(
+    cameraX: number,
+    cameraY: number,
+    viewW: number,
+    viewH: number,
+    alpha: number,
+  ): void {
+    // Generous margin: props are anchored at the feet and can be tall.
+    const margin = 64
+    const left = cameraX - margin
+    const top = cameraY - margin
+    const right = cameraX + viewW + margin
+    const bottom = cameraY + viewH + margin
+
+    let visible = 0
+    for (const prop of this.props) {
+      if (prop.x < left || prop.x > right || prop.y < top || prop.y > bottom) {
+        prop.sprite.visible = false
+        continue
+      }
+      prop.advance(1 / TICK_HZ)
+      prop.draw(alpha)
+      visible++
+    }
+    this.visibleProps = visible
+  }
+
   get spriteCount(): number {
-    return this.bgTiles.spriteCount + this.fgTiles.spriteCount + this.aboveTiles.spriteCount + 1
+    return (
+      this.bgTiles.spriteCount +
+      this.fgTiles.spriteCount +
+      this.aboveTiles.spriteCount +
+      this.visibleProps +
+      1
+    )
+  }
+
+  get propCounts(): { visible: number; total: number } {
+    return { visible: this.visibleProps, total: this.props.length }
   }
 
   /**

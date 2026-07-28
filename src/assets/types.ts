@@ -36,6 +36,11 @@ export interface CharacterManifest {
   file: string
   range?: [number, number]
   states: Record<string, string[]>
+  /**
+   * Only drawn inside the level editor - markers, logic gates, ambient sound
+   * emitters and the like. Invisible while playing.
+   */
+  editorOnly?: boolean
 }
 
 export interface CharsManifest {

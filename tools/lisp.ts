@@ -183,6 +183,51 @@ export interface CharacterDef {
   states: Record<string, string[]>
   /** Bounding box half-extents from `(range ...)`, when present. */
   range?: [number, number]
+  /** Name from `(funs (draw_fun ...))`, used to spot editor-only markers. */
+  drawFun?: string
+}
+
+/**
+ * Names of draw functions that only ever draw inside the level editor.
+ *
+ * Objects like START, MARKER, the logic gates and AMBIENT_SOUND all carry art
+ * so they can be placed in the editor, but are invisible while playing. The
+ * built-in `dev_draw` marks most of them; the sensors use a hand-written
+ * function whose whole body is one unguarded `(if (edit_mode) ...)`.
+ *
+ * The narrow "single if, no else" test matters. Several functions mention
+ * `edit_mode` and still draw in game - `pred_draw` is
+ * `(if (edit_mode) (ant_draw) (draw_predator))`, and `al_char_draw` calls
+ * `(draw)` before its edit-mode extras - so a looser test would make real
+ * monsters invisible.
+ */
+export function extractEditorOnlyDrawFuns(forms: Sexp[]): string[] {
+  const out: string[] = []
+
+  for (const form of walk(forms)) {
+    if (!isSymbol(form[0], 'defun')) continue
+    const name = form[1]
+    if (!isSymbol(name) || !name.name.includes('draw')) continue
+
+    const body = form.slice(3)
+    if (body.length !== 1) continue
+
+    const only = body[0]
+    if (!Array.isArray(only) || !isSymbol(only[0], 'if')) continue
+
+    const condition = only[1]
+    if (!Array.isArray(condition) || !isSymbol(condition[0], 'edit_mode')) continue
+
+    // An else branch means it draws something when playing - unless that
+    // branch is literally `nil`, which is how sensor_draw spells "draw
+    // nothing".
+    const alternative = only[3]
+    if (only.length > 3 && !isSymbol(alternative, 'nil')) continue
+
+    out.push(name.name)
+  }
+
+  return out
 }
 
 /** Pulls every `def_char` with a usable `states` block out of parsed forms. */
@@ -196,12 +241,19 @@ export function extractCharacters(forms: Sexp[]): CharacterDef[] {
 
     let statesForm: Sexp[] | undefined
     let range: [number, number] | undefined
+    let drawFun: string | undefined
 
     for (const clause of form.slice(2)) {
       if (!Array.isArray(clause)) continue
       if (isSymbol(clause[0], 'states')) statesForm = clause
       else if (isSymbol(clause[0], 'range') && typeof clause[1] === 'number' && typeof clause[2] === 'number') {
         range = [clause[1], clause[2]]
+      } else if (isSymbol(clause[0], 'funs')) {
+        for (const fn of clause.slice(1)) {
+          if (Array.isArray(fn) && isSymbol(fn[0], 'draw_fun') && isSymbol(fn[1])) {
+            drawFun = fn[1].name.replace(/^,/, '')
+          }
+        }
       }
     }
 
@@ -217,7 +269,7 @@ export function extractCharacters(forms: Sexp[]): CharacterDef[] {
     }
 
     if (Object.keys(states).length === 0) continue
-    out.push({ name: nameNode.name, file: statesForm[1], states, range })
+    out.push({ name: nameNode.name, file: statesForm[1], states, range, drawFun })
   }
 
   return out

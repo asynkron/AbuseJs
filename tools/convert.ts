@@ -32,6 +32,7 @@ import {
   readForms,
   extractCharacters,
   expandCharacterTemplates,
+  extractEditorOnlyDrawFuns,
   isSymbol,
   walk,
   type CharacterDef,
@@ -132,6 +133,8 @@ interface LispScan {
   /** Ordered tile file lists from every `(load_tiles ...)` call. */
   tileFiles: string[]
   characters: CharacterDef[]
+  /** Draw functions that only run in the level editor. */
+  editorOnlyDrawFuns: Set<string>
 }
 
 async function scanLisp(): Promise<LispScan> {
@@ -145,6 +148,8 @@ async function scanLisp(): Promise<LispScan> {
 
   const tileFiles: string[] = []
   const characters = new Map<string, CharacterDef>()
+  // `dev_draw` is a built-in; the rest are found by shape in the scripts.
+  const editorOnlyDrawFuns = new Set<string>(['dev_draw'])
 
   for (const file of files) {
     let forms: Sexp[]
@@ -162,9 +167,10 @@ async function scanLisp(): Promise<LispScan> {
     }
     for (const c of extractCharacters(forms)) characters.set(c.name, c)
     for (const c of expandCharacterTemplates(forms)) characters.set(c.name, c)
+    for (const fn of extractEditorOnlyDrawFuns(forms)) editorOnlyDrawFuns.add(fn)
   }
 
-  return { tileFiles, characters: [...characters.values()] }
+  return { tileFiles, characters: [...characters.values()], editorOnlyDrawFuns }
 }
 
 /* ------------------------------------------------------------------ */
@@ -306,7 +312,11 @@ async function convertTiles(palette: Buffer, tileFiles: string[]) {
 /* characters + loose images                                           */
 /* ------------------------------------------------------------------ */
 
-async function convertSprites(palette: Buffer, characters: CharacterDef[]) {
+async function convertSprites(
+  palette: Buffer,
+  characters: CharacterDef[],
+  editorOnlyDrawFuns: Set<string>,
+) {
   const specFiles = await listFiles(SRC, '.spe')
 
   const frameInputs: PackInput[] = []
@@ -400,8 +410,12 @@ async function convertSprites(palette: Buffer, characters: CharacterDef[]) {
   }
   for (const s of standalone) imageTable[s.key] = s.file
 
-  const characterTable: Record<string, { file: string; range?: [number, number]; states: Record<string, string[]> }> = {}
+  const characterTable: Record<
+    string,
+    { file: string; range?: [number, number]; states: Record<string, string[]>; editorOnly?: true }
+  > = {}
   let unresolved = 0
+  let editorOnly = 0
   for (const c of characters) {
     const states: Record<string, string[]> = {}
     for (const [state, names] of Object.entries(c.states)) {
@@ -410,7 +424,14 @@ async function convertSprites(palette: Buffer, characters: CharacterDef[]) {
       if (resolved.length) states[state] = resolved
     }
     if (Object.keys(states).length) {
-      characterTable[c.name] = { file: c.file, ...(c.range ? { range: c.range } : {}), states }
+      const hidden = c.drawFun !== undefined && editorOnlyDrawFuns.has(c.drawFun)
+      if (hidden) editorOnly++
+      characterTable[c.name] = {
+        file: c.file,
+        ...(c.range ? { range: c.range } : {}),
+        states,
+        ...(hidden ? { editorOnly: true as const } : {}),
+      }
     }
   }
 
@@ -428,6 +449,7 @@ async function convertSprites(palette: Buffer, characters: CharacterDef[]) {
     imagePages: images.pages.length,
     standalone: standalone.length,
     characters: Object.keys(characterTable).length,
+    editorOnly,
     unresolved,
   }
 }
@@ -631,7 +653,7 @@ async function main() {
   const tiles = await convertTiles(palette, lisp.tileFiles)
 
   console.log(`converting sprites (${lisp.characters.length} character definitions)...`)
-  const sprites = await convertSprites(palette, lisp.characters)
+  const sprites = await convertSprites(palette, lisp.characters, lisp.editorOnlyDrawFuns)
 
   console.log('converting levels...')
   const levels = await convertLevels()
@@ -647,7 +669,7 @@ async function main() {
       `  background tiles : ${tiles.back}`,
       `  tile atlas pages : ${tiles.pages}`,
       `  character frames : ${sprites.frames} on ${sprites.framePages} page(s)`,
-      `  characters       : ${sprites.characters}` +
+      `  characters       : ${sprites.characters} (${sprites.editorOnly} editor-only)` +
         (sprites.unresolved ? ` (${sprites.unresolved} frame refs unresolved)` : ''),
       `  loose images     : ${sprites.images} (${sprites.standalone} standalone)`,
       `  levels           : ${levels.levels} (${levels.lights} light sources)`,

@@ -39,7 +39,7 @@ export class Entity implements Body {
     readonly character: string,
   ) {
     this.sprite.anchor.set(0, 0)
-    this.setState('stopped')
+    this.setState(assets.defaultState(character))
   }
 
   setPosition(x: number, y: number): void {
