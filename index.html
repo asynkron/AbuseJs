@@ -29,16 +29,20 @@
         transition: opacity 250ms ease;
       }
       #boot.hidden { opacity: 0; }
+      /* Top-left: the bottom belongs to the game's own status bar now. */
       #hud {
         position: fixed;
         z-index: 10;
         left: 10px;
-        bottom: 8px;
+        top: 8px;
         font-size: 11px;
         color: #6f7f8f;
         white-space: pre;
         pointer-events: none;
         text-shadow: 0 1px 0 #000;
+        /* Stop long lines running under the controls panel opposite. */
+        max-width: calc(100vw - 290px);
+        overflow: hidden;
       }
 
       #controls {

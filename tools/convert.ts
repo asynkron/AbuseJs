@@ -597,6 +597,7 @@ async function convertSprites(
       states: Record<string, string[]>
       editorOnly?: true
       tints?: string
+      abilities?: Record<string, number>
     }
   > = {}
   let unresolved = 0
@@ -618,6 +619,7 @@ async function convertSprites(
         states,
         ...(hidden ? { editorOnly: true as const } : {}),
         ...(tinted ? { tints: tinted.array } : {}),
+        ...(c.abilities && Object.keys(c.abilities).length ? { abilities: c.abilities } : {}),
       }
     }
   }

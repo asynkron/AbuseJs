@@ -52,6 +52,8 @@ export interface CharacterManifest {
    * colour variant, e.g. `ant_tints`.
    */
   tints?: string
+  /** `(abilities ...)` from the character definition, e.g. `start_hp`. */
+  abilities?: Record<string, number>
 }
 
 export interface CharsManifest {

@@ -49,6 +49,8 @@ export class Player extends Entity {
   onGround = false
   /** Aim direction in degrees, counter-clockwise from due right. */
   aimAngle = 0
+  /** Nothing damages the player yet; this is what the status bar shows. */
+  health: number
 
   private readonly topFrames: Frame[]
   private coyote = 0
@@ -64,6 +66,7 @@ export class Player extends Entity {
     this.halfWidth = 7
     this.height = 28
     this.topFrames = assets.animation(TOP_CHARACTER, 'stopped')
+    this.health = assets.ability('DARNEL', 'start_hp') ?? 100
   }
 
   /** Points the torso at a world-space position. */

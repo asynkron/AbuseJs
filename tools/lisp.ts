@@ -185,6 +185,8 @@ export interface CharacterDef {
   range?: [number, number]
   /** Name from `(funs (draw_fun ...))`, used to spot editor-only markers. */
   drawFun?: string
+  /** `(abilities (start_hp 100) (run_top_speed 9) ...)` as a plain record. */
+  abilities?: Record<string, number>
 }
 
 /**
@@ -242,12 +244,20 @@ export function extractCharacters(forms: Sexp[]): CharacterDef[] {
     let statesForm: Sexp[] | undefined
     let range: [number, number] | undefined
     let drawFun: string | undefined
+    let abilities: Record<string, number> | undefined
 
     for (const clause of form.slice(2)) {
       if (!Array.isArray(clause)) continue
       if (isSymbol(clause[0], 'states')) statesForm = clause
       else if (isSymbol(clause[0], 'range') && typeof clause[1] === 'number' && typeof clause[2] === 'number') {
         range = [clause[1], clause[2]]
+      } else if (isSymbol(clause[0], 'abilities')) {
+        abilities = {}
+        for (const ability of clause.slice(1)) {
+          if (Array.isArray(ability) && isSymbol(ability[0]) && typeof ability[1] === 'number') {
+            abilities[ability[0].name] = ability[1]
+          }
+        }
       } else if (isSymbol(clause[0], 'funs')) {
         for (const fn of clause.slice(1)) {
           if (Array.isArray(fn) && isSymbol(fn[0], 'draw_fun') && isSymbol(fn[1])) {
@@ -269,7 +279,7 @@ export function extractCharacters(forms: Sexp[]): CharacterDef[] {
     }
 
     if (Object.keys(states).length === 0) continue
-    out.push({ name: nameNode.name, file: statesForm[1], states, range, drawFun })
+    out.push({ name: nameNode.name, file: statesForm[1], states, range, drawFun, abilities })
   }
 
   return out

@@ -11,6 +11,7 @@ import { TileLayer } from '../render/TileLayer'
 import { Level } from './Level'
 import { Player } from './Player'
 import { spawnProps, type Prop } from './Prop'
+import { StatusBar } from '../render/StatusBar'
 import { TrainMessages } from './TrainMessages'
 import { isBlocked, isGrounded } from './collision'
 
@@ -66,6 +67,9 @@ export class World {
   /** Tutorial text overlay, in screen space. */
   readonly messages: TrainMessages
 
+  /** The original status bar, in screen space. */
+  readonly statusBar: StatusBar
+
   constructor(
     assets: GameAssets,
     readonly level: Level,
@@ -95,6 +99,7 @@ export class World {
 
     this.ambience = new AmbientSounds(audio, level.objects)
     this.messages = new TrainMessages(assets, level.objects, trainMessages)
+    this.statusBar = new StatusBar(assets)
 
     this.camera = new Camera(viewWidth, viewHeight)
 
@@ -183,6 +188,8 @@ export class World {
     this.lights.update(renderer, lights, minLight, camera.x, camera.y, this.zoom)
 
     this.messages.layout(viewW, viewH, this.zoom)
+    this.statusBar.setHealth(this.player.health)
+    this.statusBar.layout(viewW, viewH, this.zoom)
   }
 
   /**
@@ -243,6 +250,7 @@ export class World {
   destroy(): void {
     this.lights.destroy()
     this.messages.destroy()
+    this.statusBar.destroy()
     this.root.destroy({ children: true })
   }
 

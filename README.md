@@ -141,18 +141,31 @@ One approximation: `inner_radius` is treated as 0, so a single normalised fallof
 every light. It is 1 for 5152 of the 5617 lights (a ~1% error) and 10 for 49 of them. Type 9 — a
 solid rectangle that overrides everything beneath it — occurs 3 times in 125 levels and is skipped.
 
+## Music
+
+`tools/hmi.ts` converts the 14 HMI tracks to standard MIDI, ported from
+`src/sdlport/hmi.cpp`. HMI differs from MIDI in three ways that matter: offsets instead of chunk
+headers, note-on events carrying a duration rather than a matching note-off (so note-offs are
+queued and emitted at the right delta), and an undocumented `0xFE` event that gets skipped. Tempo
+and division are fixed exactly as the engine writes them. All 14 convert: 21601 notes, zero parse
+errors on read-back.
+
+`src/audio/MusicPlayer.ts` schedules the result through WebAudio with the usual lookahead. **It
+synthesises the notes rather than sampling the shipped soundfont** — one oscillator per voice with
+the waveform chosen from the General MIDI program family, plus noise bursts for percussion. That is
+the real composition with a substitute voice; a proper SF2 sampler is a much larger job than the
+music warranted. The two soundfonts are still in `assets/original/soundfonts/` for whoever wants to.
+
+Levels map to tracks by name (`levelNN` → `abuseNN`) and fall back to a stable hash.
+
 ## Not done yet
 
 - **Mechanics.** No combat, AI, weapons, damage or pickups — by design. Level objects are spawned
   and animated but inert; they are scenery for mechanics that do not exist yet.
-- **Music** (`.hmi`) is copied but not converted. It is HMI MIDI and needs either a converter plus
-  a JS synth using the two shipped soundfonts, or offline transcoding with tooling this machine
-  does not have.
-- **The real HUD.** `art/statbar.spe` and `art/status.spe` are converted and the bitmap font
-  renders; there is nothing to put in them until there are stats.
-- **Tints beyond the ants.** The cop and gun tint sets exist but are not baked — add them to
-  `TINTED_SHEETS` in `tools/convert.ts`.
-- Per-frame root motion (`advance`) is exported but not driven.
+- **Music timbres.** The 14 tracks are converted and play, but through a synthesised voice rather
+  than the Roland SC-55 soundfont the original uses — see below.
+- **Status bar contents.** The panel and health are real; weapon slots and ammo counts stay empty
+  until there are weapons to hold.
 
 - **18 addon levels reference tiles that were never shipped** — mostly `addon/claudio/*` and
   `addon/pong/*`, plus a dozen stray cells in `levels/frabs18` and `levels/frabs30`. `abuse.lsp`

@@ -200,7 +200,7 @@ async function start() {
     const data = await assets.loadLevel(id)
 
     if (world) {
-      app.stage.removeChild(world.root, world.lights.overlay, world.messages.container)
+      app.stage.removeChild(world.root, world.lights.overlay, world.statusBar.container, world.messages.container)
       world.destroy()
     }
 
@@ -211,7 +211,7 @@ async function start() {
     // The light overlay multiplies over the finished scene, so it sits on top
     // of the world but still inside the stage, and therefore under the CRT.
     // Messages go above the lighting - a tutorial line should not be in shadow.
-    app.stage.addChild(world.root, world.lights.overlay, world.messages.container)
+    app.stage.addChild(world.root, world.lights.overlay, world.statusBar.container, world.messages.container)
     world.resize(viewWidth, viewHeight, zoom)
     if (location.hash.replace(/^#/, '') !== id) history.replaceState(null, '', `#${id}`)
     startMusicFor(id)

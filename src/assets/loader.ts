@@ -177,6 +177,11 @@ export class GameAssets {
     return states[0] ?? 'stopped'
   }
 
+  /** One of a character's `(abilities ...)` values, e.g. `start_hp`. */
+  ability(character: string, name: string): number | undefined {
+    return this.chars.characters[character]?.abilities?.[name]
+  }
+
   /** True for markers and logic objects that the original only drew in-editor. */
   isEditorOnly(character: string): boolean {
     return this.chars.characters[character]?.editorOnly === true
