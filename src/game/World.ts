@@ -1,8 +1,9 @@
-import { Container } from 'pixi.js'
+import { Container, type Renderer } from 'pixi.js'
 
 import type { GameAssets } from '../assets/loader'
 import { Camera } from '../core/camera'
 import type { Input } from '../core/input'
+import { LightLayer } from '../render/LightLayer'
 import { TileLayer } from '../render/TileLayer'
 import { Level } from './Level'
 import { Player } from './Player'
@@ -25,6 +26,12 @@ export class World {
   private readonly bgTiles: TileLayer
   private readonly fgTiles: TileLayer
   private readonly aboveTiles: TileLayer
+
+  /**
+   * Static level lighting. It lives in screen space and multiplies over the
+   * finished scene, so it is a sibling of `root` rather than a child.
+   */
+  readonly lights = new LightLayer()
 
   readonly camera: Camera
   readonly player: Player
@@ -62,6 +69,7 @@ export class World {
     this.camera.viewWidth = viewWidth
     this.camera.viewHeight = viewHeight
     this.zoom = zoom
+    this.lights.resize(Math.ceil(viewWidth * zoom), Math.ceil(viewHeight * zoom))
   }
 
   update(input: Input): void {
@@ -79,7 +87,7 @@ export class World {
     })
   }
 
-  render(alpha: number): void {
+  render(alpha: number, renderer: Renderer): void {
     const { camera } = this
     const viewW = camera.viewWidth
     const viewH = camera.viewHeight
@@ -97,6 +105,10 @@ export class World {
     // Layers are placed in world space; the containers carry the camera offset.
     this.backdrop.position.set(-bgX, -bgY)
     this.scene.position.set(-camera.x, -camera.y)
+
+    // Renders to its own target, so it has to happen before the main pass.
+    const { minLight, lights } = this.level.lighting
+    this.lights.update(renderer, lights, minLight, camera.x, camera.y, this.zoom)
   }
 
   get spriteCount(): number {

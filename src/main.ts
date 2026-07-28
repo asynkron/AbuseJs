@@ -132,7 +132,9 @@ async function start() {
 
   const world = new World(assets, level, viewWidth, viewHeight)
   world.root.scale.set(zoom)
-  app.stage.addChild(world.root)
+  // The light overlay multiplies over the finished scene, so it sits on top of
+  // the world but still inside the stage, and therefore under the CRT pass.
+  app.stage.addChild(world.root, world.lights.overlay)
 
   const input = new Input()
 
@@ -171,8 +173,8 @@ async function start() {
   applySize()
 
   window.addEventListener('keydown', (e) => {
-    if (e.code !== 'KeyV') return
-    setCrtEnabled(!crtEnabled)
+    if (e.code === 'KeyV') setCrtEnabled(!crtEnabled)
+    else if (e.code === 'KeyL') world.lights.enabled = !world.lights.enabled
   })
 
   let frames = 0
@@ -184,7 +186,7 @@ async function start() {
     (alpha) => {
       applySize()
       crt.time = performance.now() / 1000
-      world.render(alpha)
+      world.render(alpha, app.renderer)
       app.render()
 
       frames++
@@ -196,9 +198,12 @@ async function start() {
         hud.textContent = [
           `${levelId}  "${level.name}"  ${level.fgWidth}x${level.fgHeight} tiles`,
           `pos ${world.player.x.toFixed(0)},${world.player.y.toFixed(0)}  ${world.player.state}` +
-            `${world.player.onGround ? '' : ' (air)'}  x${zoom}  ${fps}fps  ${world.spriteCount} sprites`,
+            `${world.player.onGround ? '' : ' (air)'}  x${zoom}  ${fps}fps  ${world.spriteCount} sprites` +
+            `  ${world.lights.visibleCount}/${level.lighting.lights.length} lights` +
+            ` @ambient ${level.lighting.minLight}/63`,
           `objects: ${world.objectSummary}`,
-          `arrows/WASD move   space jump   shift run   V crt:${crtEnabled ? 'on' : 'off'}`,
+          `arrows/WASD move   space jump   shift run` +
+            `   V crt:${crtEnabled ? 'on' : 'off'}   L light:${world.lights.enabled ? 'on' : 'off'}`,
         ].join('\n')
       }
     },
@@ -219,7 +224,7 @@ async function start() {
       step(ticks = 1) {
         for (let i = 0; i < ticks; i++) world.update(input)
         applySize()
-        world.render(0)
+        world.render(0, app.renderer)
         app.render()
       },
       press(action: keyof typeof input.state, down = true) {

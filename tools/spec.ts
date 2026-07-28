@@ -232,6 +232,44 @@ export function readTileMap(buf: Buffer, offset: number): TileMap {
   return { width, height, cells }
 }
 
+export interface LightSource {
+  x: number
+  y: number
+  /** Power-of-two squash: the light's reach is `outer >> shift` on that axis. */
+  xshift: number
+  yshift: number
+  inner: number
+  outer: number
+  /** Which quadrants around the centre the light covers; see light.cpp, calc_range. */
+  type: number
+}
+
+export interface LightList {
+  /** Ambient floor, 0..63. Everything in the level sits at least this bright. */
+  minLight: number
+  lights: LightSource[]
+}
+
+/** Reads a level's `lights` entry (src/light.cpp, read_lights). */
+export function readLightList(buf: Buffer, offset: number): LightList {
+  const count = buf.readUInt32LE(offset)
+  const minLight = buf.readUInt32LE(offset + 4)
+  const lights: LightSource[] = []
+  let p = offset + 8
+  for (let i = 0; i < count; i++, p += 25) {
+    lights.push({
+      x: buf.readInt32LE(p),
+      y: buf.readInt32LE(p + 4),
+      xshift: buf.readInt32LE(p + 8),
+      yshift: buf.readInt32LE(p + 12),
+      inner: buf.readInt32LE(p + 16),
+      outer: buf.readInt32LE(p + 20),
+      type: buf.readUInt8(p + 24),
+    })
+  }
+  return { minLight, lights }
+}
+
 export const FG_TILE_MASK = 0x3fff
 /** Tile is drawn after entities, as a foreground overlay. */
 export const FG_ABOVE = 0x4000

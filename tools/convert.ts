@@ -23,6 +23,7 @@ import {
   readTileMap,
   readTaggedArray,
   readNameList,
+  readLightList,
   SpecType,
   type PalettizedImage,
   type SpecFile,
@@ -442,6 +443,7 @@ async function convertLevels() {
   await mkdir(join(OUT, 'levels'), { recursive: true })
 
   const index: { id: string; name: string; width: number; height: number; objects: number }[] = []
+  let lightCount = 0
 
   for (const path of specFiles) {
     const buf = await readFile(path)
@@ -466,6 +468,7 @@ async function convertLevels() {
         height: level.fg.h,
         objects: level.objects.length,
       })
+      lightCount += level.lighting.lights.length
     } catch (err) {
       console.warn(`  ! level ${id}: ${(err as Error).message}`)
     }
@@ -473,7 +476,7 @@ async function convertLevels() {
 
   index.sort((a, b) => a.id.localeCompare(b.id))
   await writeJSON(join(OUT, 'levels.json'), index)
-  return index.length
+  return { levels: index.length, lights: lightCount }
 }
 
 function readLevel(spec: SpecFile, buf: Buffer, id: string) {
@@ -500,12 +503,18 @@ function readLevel(spec: SpecFile, buf: Buffer, id: string) {
 
   const objects = readObjects(spec, buf)
 
+  const lightEntry = spec.byName.get('lights')
+  const lighting = lightEntry
+    ? readLightList(buf, lightEntry.offset)
+    : { minLight: 63, lights: [] }
+
   return {
     id,
     firstName,
     fg: { w: fg.width, h: fg.height, cells: base64OfU16(fg.cells) },
     bg: { w: bg.width, h: bg.height, cells: base64OfU16(bg.cells) },
     bgScroll,
+    lighting,
     objects,
   }
 }
@@ -641,7 +650,7 @@ async function main() {
       `  characters       : ${sprites.characters}` +
         (sprites.unresolved ? ` (${sprites.unresolved} frame refs unresolved)` : ''),
       `  loose images     : ${sprites.images} (${sprites.standalone} standalone)`,
-      `  levels           : ${levels}`,
+      `  levels           : ${levels.levels} (${levels.lights} light sources)`,
       `  sound effects    : ${sounds}`,
       `  palette tints    : ${Object.keys(tints).length}`,
     ].join('\n'),

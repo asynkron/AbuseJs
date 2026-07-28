@@ -15,7 +15,7 @@ npm run dev      # http://localhost:5173
 ```
 
 Controls: **arrows/WASD** move, **space** jump, **shift** run, **mouse** aims the torso,
-**V** toggles the CRT filter.
+**V** toggles the CRT filter, **L** toggles level lighting.
 Append a level id to the URL to load it, e.g. `#levels/level14` — any id in `public/assets/levels.json`.
 
 ## Layout
@@ -44,7 +44,7 @@ src/
 | `tiles.json` + `tiles/*.png` | 1109 foreground and 405 background tiles in grid atlases |
 | `chars.json` + `chars/*.png` | 2309 sprite frames and 271 character animation sets, one 2048² page |
 | `images.json` + `images/*.png` | 442 loose images (HUD, fonts, title screens) |
-| `levels.json` + `levels/*.json` | 125 levels: both tile grids plus the typed object list |
+| `levels.json` + `levels/*.json` | 125 levels: both tile grids, the typed object list, 5617 light sources |
 | `sfx/*.wav` + `sfx.json` | 133 sound effects (8-bit mono 11 kHz PCM, plays as-is) |
 | `palette.json` | The 256-colour palette plus 25 tint tables |
 
@@ -101,11 +101,37 @@ last and outside the intensity mix, so they also correct the raw image with the 
 and they persist in `localStorage`. `new CrtFilter({ intensity })` dials the whole pass back
 instead.
 
+## Lighting
+
+Abuse is dark with pools of light, not evenly lit, and that comes from a static light list stored
+in every level: an ambient floor (`minLight`, 35/63 in most levels) plus 58–151 light sources.
+
+`src/render/LightLayer.ts` accumulates every visible light additively into an offscreen buffer that
+starts at the ambient floor, then multiplies that buffer over the finished scene. The falloff is
+ported from `calc_light_value` in the original `src/light.cpp`:
+
+```
+dx = |lx - px| << xshift          dy = |ly - py| << yshift
+r  = dx + dy - min(dx, dy) / 2                    # octagonal, not circular
+contribution = (outer - r) / (outer - inner) * 64
+```
+
+summed on top of `minLight` and clamped to 63. Two details worth keeping:
+
+- **The distance metric is an octagon**, not a circle. That faceted edge is part of the look, so it
+  is baked into the gradient texture rather than smoothed into a radial gradient.
+- **`type` selects which quadrants the light covers** (full ellipse, halves, quadrants), which is
+  how wall-mounted lamps throw directionally. `xshift`/`yshift` squash the reach by powers of two,
+  so lights are ellipses.
+
+Costs ~0.2 ms/frame. Toggle with **L** to see the difference.
+
+One approximation: `inner_radius` is treated as 0, so a single normalised falloff texture serves
+every light. It is 1 for 5152 of the 5617 lights (a ~1% error) and 10 for 49 of them. Type 9 — a
+solid rectangle that overrides everything beneath it — occurs 3 times in 125 levels and is skipped.
+
 ## Not done yet
 
-- **Lighting.** Abuse dims the scene with a per-level light list and an ambient level; we render
-  unlit, which is why everything is brighter than the original. The light entries are decoded but
-  unused.
 - **Slopes** collide as their bounding box (see above).
 - **Tints** — palette remaps for enemy colour variants — are exported but not applied.
 - **Music** (`.hmi`) is copied but not converted.

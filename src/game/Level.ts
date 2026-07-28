@@ -87,6 +87,10 @@ export class Level {
     return this.data.bgScroll
   }
 
+  get lighting() {
+    return this.data.lighting ?? { minLight: 63, lights: [] }
+  }
+
   /** Raw foreground cell, flags included. Out of bounds reads as solid rock. */
   fgCell(cx: number, cy: number): number {
     if (cx < 0 || cy < 0 || cx >= this.fgWidth || cy >= this.fgHeight) return -1

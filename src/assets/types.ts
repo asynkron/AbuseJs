@@ -55,12 +55,31 @@ export interface LevelObjectData {
   aitype: number
 }
 
+export interface LightSource {
+  x: number
+  y: number
+  /** Power-of-two squash: the light's reach is `outer >> shift` on that axis. */
+  xshift: number
+  yshift: number
+  inner: number
+  outer: number
+  /** Which quadrants around the centre the light covers. */
+  type: number
+}
+
+export interface LightingData {
+  /** Ambient floor, 0..63. */
+  minLight: number
+  lights: LightSource[]
+}
+
 export interface LevelData {
   id: string
   firstName: string
   fg: { w: number; h: number; cells: string }
   bg: { w: number; h: number; cells: string }
   bgScroll: { xmul: number; xdiv: number; ymul: number; ydiv: number }
+  lighting: LightingData
   objects: LevelObjectData[]
 }
 
