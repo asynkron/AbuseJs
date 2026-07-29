@@ -237,7 +237,10 @@ async function start() {
     // Messages go above the lighting - a tutorial line should not be in shadow.
     app.stage.addChild(world.root, world.lights.overlay, world.statusBar.container, world.messages.container)
     world.resize(viewWidth, viewHeight, zoom)
-    if (location.hash.replace(/^#/, '') !== id) history.replaceState(null, '', `#${id}`)
+    // Deliberately not written back to the URL. Doing so left `#levels/level01`
+    // in the address bar, which the next visit read as a deep link and used to
+    // skip the title screen - so the menu appeared exactly once, ever. The hash
+    // now means only what someone typed there.
     startMusicFor(id)
   }
 
