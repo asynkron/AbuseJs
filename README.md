@@ -3,6 +3,8 @@
 A web game built on the art, levels and sounds of **Abuse** (Crack dot Com, 1995), with our own
 game mechanics. Rendering is PixiJS v8 (WebGL/WebGPU); everything else is ours.
 
+**Play it: [asynkron.github.io/AbuseJs](https://asynkron.github.io/AbuseJs/)**
+
 Current state: real Abuse levels load with their lighting, tile layers, objects, ambience, music and
 tutorial text; the cop runs, jumps, climbs ramps, rides platforms, takes teleporters and walks
 between levels through the original exit portals. It shoots, and the level shoots back — turrets
@@ -325,6 +327,16 @@ here obeys the mute gate — a muted page loads no music at all.
 
 - **Tile animation.** The `next` field is 0 on all 1109 foreground and 405 background tiles, and
   the engine never reads it. Animated lava, teleporters and screens are objects, not tiles.
+
+## Deploying
+
+`.github/workflows/pages.yml` builds the site on every push to `main` and publishes it to GitHub
+Pages. The generated assets are gitignored, so CI runs `npm run assets` against `assets/original/`
+rather than committing the output — the repo holds Abuse's shipped data, not a derivative of it.
+23MB and 313 files come out the other end.
+
+`vite.config.ts` sets `base: './'` rather than `/AbuseJs/`, so the same build works at a domain root
+and under a project path. Every asset fetch in the app is already relative to the document.
 
 ## Licensing
 
