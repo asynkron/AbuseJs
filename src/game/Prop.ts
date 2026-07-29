@@ -60,9 +60,18 @@ export class Prop extends Entity {
   }
 
   advance(dt: number): void {
-    if (this.deathTimer > 0 && --this.deathTimer === 0) this.dead = true
     if (!this.loops) return
     this.advanceAnimation(Prop.FPS * dt)
+  }
+
+  /**
+   * Counts the corpse down. Separate from `advance` because that runs from the
+   * draw pass, which skips anything off screen - a body killed just before it
+   * scrolled out of view would sit there forever waiting for a tick that only
+   * arrives if you happen to look at it.
+   */
+  tickLifetime(): void {
+    if (this.deathTimer > 0 && --this.deathTimer === 0) this.dead = true
   }
 
   get isDead(): boolean {
@@ -95,13 +104,18 @@ export class Prop extends Entity {
 
     this.health = 0
     // `dieing` is the death throe, `dead` the corpse; most have one or neither.
+    let hasCorpse = false
     for (const state of ['dieing', 'dead']) {
       if (this.assets.hasState(this.character, state)) {
         this.setState(state, true)
+        hasCorpse = true
         break
       }
     }
-    this.deathTimer = Prop.DEATH_TICKS
+    // With nothing to show there is no reason to linger: it would just sit on
+    // whichever frame it happened to die on - a flinch, for anything that was
+    // being shot at - until the timer ran out. The explosion is the feedback.
+    this.deathTimer = hasCorpse ? Prop.DEATH_TICKS : 1
     return true
   }
 }

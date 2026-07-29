@@ -119,8 +119,11 @@ level contains. They bob on a patrol line, drift towards you when you come withi
 full nine-frame `turn_around` when they reverse, and `flinch_up` when hit.
 
 **Deaths pop.** `EG_EXPLO`'s four-frame blast goes off over the middle of anything that dies, with
-`P_EXPLODE_SND` behind it. Most characters have no `dieing` or `dead` state - `WHO` has neither -
-so without this they simply blinked out of existence.
+`P_EXPLODE_SND` behind it. Most characters have no `dieing` or `dead` state — `WHO` has neither — so
+those are cleared on the next tick rather than lingering for the corpse timer, which would only hold
+them on whichever frame they died on. The corpse countdown runs from the simulation, not the draw
+pass: the draw pass skips anything off screen, so a body killed just as it scrolled away would wait
+forever for a tick that only arrived if you looked back at it.
 
 **Platforms and teleporters** read their endpoints out of the level: a platform's travel is the
 `xacel`/`yacel` pair, its surface is the top of its own sprite, and `start_accel` is how far away

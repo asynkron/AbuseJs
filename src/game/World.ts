@@ -219,6 +219,7 @@ export class World {
     this.applySignals()
     this.collectPickups()
     this.updateEnemies()
+    this.retireDead()
     this.effects.update()
 
     this.camera.follow(this.player.x, this.player.y - this.player.height / 2, {
@@ -415,14 +416,28 @@ export class World {
       this.audio.playNamed(which, { volume: 0.6, x: impact.x, y: impact.y })
     }
 
-    // Retire anything whose corpse has lingered long enough.
-    for (let i = this.props.length - 1; i >= 0; i--) {
-      const prop = this.props[i]
-      if (!prop.isDead) continue
-      prop.sprite.destroy()
-      this.props.splice(i, 1)
-      const t = this.targets.indexOf(prop)
-      if (t >= 0) this.targets.splice(t, 1)
+  }
+
+  /**
+   * Ages every corpse and clears the ones that have run their timer out.
+   *
+   * The actors that got promoted out of `props` - turrets, ants, floaters -
+   * have to be swept too. They were not, so a dead one hung around frozen on
+   * whichever frame it died on, which for a character with no death state is
+   * its flinch: shoot a WHO and it turned red and stayed there.
+   */
+  private retireDead(): void {
+    for (const list of [this.props, this.turrets, this.ants, this.floaters] as Prop[][]) {
+      for (let i = list.length - 1; i >= 0; i--) {
+        const prop = list[i]
+        prop.tickLifetime()
+        if (!prop.isDead) continue
+
+        prop.sprite.destroy()
+        list.splice(i, 1)
+        const t = this.targets.indexOf(prop)
+        if (t >= 0) this.targets.splice(t, 1)
+      }
     }
   }
 
