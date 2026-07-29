@@ -52,6 +52,33 @@ and **179 heads are called twice or less**. The real engine surface is roughly:
 
 Nothing here is hard. It is wide, not deep, and most hooks are one-liners.
 
+## Where it stands
+
+`tools/compile.ts` exists and compiles. Against the 31 core `lisp/*.lsp` files it produces **254
+functions and 178KB of readable JavaScript**, and reports **284 distinct runtime hooks** — down from
+the 587 raw call heads once `def_char` and friends are recognised as the declaration forms they are.
+**142 of the 284 are used by a single file**, so the working set is far smaller than the total.
+
+The output is verifiably right where it can be checked by hand. `hwall_ai` compiles to the same
+`hurt_radius(x + 15 * direction, y - 7, 50, 60, bg, 20)` that was transcribed by hand into
+`World.runBlasts` — derived independently, and matching.
+
+By breadth of use the first thirty hooks are: `x y aistate with_object play_sound get_object
+total_objects next_picture bg set_aistate xvel set_xvel set_x set_state aitype set_y state
+add_object random set_yvel state_time list yvel hp activated concatenate direction go_state distx
+set_aitype`. That set is the target for the first runtime.
+
+### Still to do in the compiler
+
+- **Quote and backquote.** `tools/lisp.ts` drops `'` and skips `` ` `` — fine for the asset
+  pipeline, wrong for codegen. Quoted symbols currently land as global reads, which happens to work
+  for character and state names but will not hold in general.
+- **Per-object `vars`.** `(vars end_y)` on `FORCE_FIELD` should be storage on the object, not a
+  module global. `ff_draw` currently compiles to `G.end_y`, which is shared by every force field in
+  the level.
+- **`select` on non-numbers.** Compiled as `===` against each arm; fine for `aistate`, needs
+  checking for the string and symbol cases.
+
 ## Order of work
 
 **1. Codegen.** `tools/lisp.ts` already reads s-expressions correctly, including the backquote
