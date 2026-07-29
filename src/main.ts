@@ -220,6 +220,7 @@ async function start() {
    * objects for us.
    */
   const loadLevel = async (id: string) => {
+    World.currentLevelId = id
     say(`loading ${id}`)
     const data = await assets.loadLevel(id)
 
@@ -417,6 +418,20 @@ async function start() {
     skip: deepLinked,
   })
   setDifficulty(choice.difficulty)
+
+  // Resuming means the level the save was taken in, not the one we booted
+  // into. Without this you always started on level01 - and then the save's
+  // own level check failed, so nothing was restored either.
+  if (choice.resume) {
+    const saved = readSave()
+    World.resumeFromSave = true
+    if (saved && saved.level !== currentLevelId && assets.levels.some((l) => l.id === saved.level)) {
+      await loadLevel(saved.level)
+    } else {
+      await loadLevel(currentLevelId)
+    }
+  }
+
   unlockAudio()
 
   // Started only now, so the world does not tick away behind the title screen -

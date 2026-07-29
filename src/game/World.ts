@@ -111,6 +111,22 @@ const FULL_VOLUME = 127
  * how the player ends up walking behind pillars and doorframes.
  */
 export class World {
+  /**
+   * Set by the title screen before the first level loads. A one-shot, because
+   * only the level you resume into restores - walking on to the next one
+   * should not put the save back.
+   */
+  static resumeFromSave = false
+
+  /**
+   * The id the level was loaded under, e.g. `levels/level03`.
+   *
+   * Saves key on this rather than `level.name`, which is the name baked into
+   * the SPE file and is not a usable identifier - level02's is the literal
+   * string `C:\\ABUSE\\LEVELS/LEVEL02.SPE`.
+   */
+  static currentLevelId = ''
+
   readonly root = new Container()
 
   private readonly backdrop = new Container()
@@ -311,9 +327,12 @@ export class World {
     const spawn = this.findSpawn()
     this.restartAt = spawn
 
-    // A save for this level puts you back at its console with what you had.
-    const saved = readSave()
-    if (saved && saved.level === level.name) {
+    // Restoring is the caller's decision, not this one's. Reading the save
+    // unconditionally meant "Start New Game" handed you your old health, ammo
+    // and kill count whenever the save happened to be for the same level.
+    const saved = World.resumeFromSave ? readSave() : null
+    World.resumeFromSave = false
+    if (saved && saved.level === World.currentLevelId) {
       restore(this.player, saved)
       if (saved.power) this.powers.give(saved.power)
       this.kills = saved.kills
@@ -945,7 +964,7 @@ export class World {
 
       this.restartAt = { x: console.x, y: this.player.y }
       const state = snapshot(
-        this.level.name,
+        World.currentLevelId,
         this.player,
         this.powers.kind,
         this.restartAt,
