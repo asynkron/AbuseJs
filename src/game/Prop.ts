@@ -58,7 +58,13 @@ export class Prop extends Entity {
     this.loops = assets.isIdleAnimated(data.type)
     this.hurtable = assets.hasFlag(data.type, 'hurtable')
     // Levels store a per-object hp; fall back to the character's own start_hp.
-    this.health = data.hp || assets.ability(data.type, 'start_hp') || 1
+    //
+    // Anything at or below zero counts as not saved rather than as saved
+    // health. Twenty objects across the fan-made add-on levels carry the same
+    // junk value in that slot - 0x869F, which is -31073 read the way the
+    // format's signed fields are read - and taking it at face value would put
+    // a turret on negative health before it had done anything.
+    this.health = (data.hp > 0 ? data.hp : 0) || assets.ability(data.type, 'start_hp') || 1
     this.maxHealth = this.health
   }
 

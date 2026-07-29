@@ -78,13 +78,19 @@ live next to the code that uses them; the highlights:
 
 - **SPEC container** — `"SPEC1.0\0"`, `u16` entry count, then `{u8 type, u8 nameLen, name, u8 flags,
   u32 size, u32 offset}`. The modern port ignores the legacy link flag, so we do too.
-- **Images** are `u16 w, u16 h` followed by `w*h` palette indices. Index 0 is transparent for
-  foreground tiles and sprites, opaque for background tiles.
+- **Images** are `u16 w, u16 h` followed by `w*h` palette indices. Index 0 is transparent
+  everywhere except background tiles, which have nothing behind them to show through.
 - **Tile ids are the entry names parsed as integers**, not positions — so tile numbering is global
   and load order does not matter. The file list comes from `(load_tiles ...)` in the Lisp scripts.
 - **Foreground tiles are 30×15**, background 60×30. A tile is solid exactly when it carries a
   collision outline; we currently collide against that outline's bounding box, so slopes behave as
   blocks. The raw outlines ship in `tiles.json` for doing them properly later.
+- **Range-compressed arrays are signed at every width.** An object-field array is tagged `u8` /
+  `u16` / `u32` by the narrowest type every value in it fits, and the range it is fitted against is
+  signed: `direction` is -1 or 1 and arrives as a `u8` array holding `0x01` and `0xFF`. Read
+  unsigned, that -1 becomes 255, and `direction < 0 ? -1 : 1` calls it "facing right" — 2227 objects
+  across the shipped levels, mirrored, with the cleaner robots among them walking into the wall
+  behind them and stopping.
 - **Level cells** are `u16`: `& 0x3fff` tile id, `& 0x4000` "draw after entities" (the overlay layer
   that puts pillars in front of the player), `& 0x8000` has-been-seen.
 - **Objects are self-describing** — a level stores the type and state *names* that were in use when

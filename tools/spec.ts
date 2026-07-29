@@ -284,12 +284,19 @@ export function readTaggedArray(buf: Buffer, offset: number, count: number): num
   let p = offset + 1
   for (let i = 0; i < count; i++) {
     switch (tag) {
+      // Signed, all three widths. The engine picks the narrowest tag every
+      // value in the array fits into, and `direction` is the proof that the
+      // range it fits them against is signed: it is -1 or 1, and it arrives as
+      // an RC_8 array holding 1 and 0xFF. Read unsigned, that -1 became 255,
+      // which `Prop` then rounded to "facing right" - 2227 objects across the
+      // shipped levels, every one of them mirrored, and a cleaner robot placed
+      // to walk left that walked into the wall behind it instead and stopped.
       case RC_8:
-        out[i] = buf.readUInt8(p)
+        out[i] = buf.readInt8(p)
         p += 1
         break
       case RC_16:
-        out[i] = buf.readUInt16LE(p)
+        out[i] = buf.readInt16LE(p)
         p += 2
         break
       case RC_32:
