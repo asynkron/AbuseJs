@@ -12,6 +12,7 @@ import { Level } from './Level'
 import { Player } from './Player'
 import { buildPlatforms, type Platform } from './Platform'
 import { spawnProps, type Prop } from './Prop'
+import { buildTeleporters, type Teleporter } from './Teleporter'
 import { StatusBar } from '../render/StatusBar'
 import { TrainMessages } from './TrainMessages'
 import { isBlocked, isGrounded } from './collision'
@@ -38,6 +39,7 @@ export class World {
   /** Level objects, drawn behind the player. */
   private readonly props: Prop[]
   private readonly platforms: Platform[]
+  private readonly teleporters: Teleporter[]
   /** The platform the player is standing on, so it can carry them. */
   private riding: Platform | null = null
   private visibleProps = 0
@@ -98,8 +100,9 @@ export class World {
     this.props = spawnProps(assets, level.objects)
     // Platforms take over from the inert props the level spawned for them.
     this.platforms = buildPlatforms(assets, level.objects, level.links, this.props)
+    this.teleporters = buildTeleporters(assets, level.objects, level.links, this.props)
 
-    for (const prop of [...this.props, ...this.platforms]) {
+    for (const prop of [...this.props, ...this.platforms, ...this.teleporters]) {
       this.propLayer.addChild(prop.sprite)
       if (prop.character === 'NEXT_LEVEL') this.exits.push(prop)
     }
@@ -144,8 +147,10 @@ export class World {
     // from, so carrying beforehand would make the player jump a tick ahead of
     // the platform it is standing on.
     for (const platform of this.platforms) platform.update()
+    const activating = input.state.action || input.state.down
     this.player.update(input.state, input.consumeJump())
-    this.ridePlatforms(input.state.action || input.state.down)
+    this.ridePlatforms(activating)
+    this.useTeleporters(activating)
 
     this.camera.follow(this.player.x, this.player.y - this.player.height / 2, {
       width: this.level.widthPx,
@@ -158,7 +163,7 @@ export class World {
     this.messages.update(this.player.x, this.player.y)
 
     // Down is the original's action key; E/Enter are kept as alternates.
-    if (input.state.action || input.state.down) this.checkExits()
+    if (activating) this.checkExits()
   }
 
   /**
@@ -194,6 +199,28 @@ export class World {
 
       if (activating) platform.trigger()
       return
+    }
+  }
+
+  /**
+   * Runs the teleporter pads: standing on one and pressing down starts its
+   * spin, and when the spin finishes the player is put down at the pad it is
+   * linked to.
+   */
+  private useTeleporters(activating: boolean): void {
+    for (const pad of this.teleporters) {
+      const arrival = pad.update()
+      if (arrival) {
+        this.player.setPosition(arrival.x, arrival.y)
+        this.player.vx = 0
+        this.player.vy = 0
+        this.riding = null
+        continue
+      }
+
+      if (!activating || pad.isCharging) continue
+      if (!pad.covers(this.player.x, this.player.y)) continue
+      if (pad.trigger()) this.audio.playNamed('TELEPORTER_SND', { x: pad.x, y: pad.y })
     }
   }
 
@@ -264,7 +291,7 @@ export class World {
     const bottom = cameraY + viewH + margin
 
     let visible = 0
-    for (const prop of [...this.props, ...this.platforms]) {
+    for (const prop of [...this.props, ...this.platforms, ...this.teleporters]) {
       if (prop.x < left || prop.x > right || prop.y < top || prop.y > bottom) {
         prop.sprite.visible = false
         continue
@@ -287,12 +314,19 @@ export class World {
   }
 
   get propCounts(): { visible: number; total: number } {
-    return { visible: this.visibleProps, total: this.props.length + this.platforms.length }
+    return {
+      visible: this.visibleProps,
+      total: this.props.length + this.platforms.length + this.teleporters.length,
+    }
   }
 
   get platformStatus(): string {
     const moving = this.platforms.filter((p) => p.isMoving).length
-    return `${this.platforms.length} platforms${moving ? ` (${moving} moving)` : ''}${this.riding ? ' riding' : ''}`
+    const spinning = this.teleporters.filter((t) => t.isCharging).length
+    return (
+      `${this.platforms.length} plat${moving ? `(${moving} moving)` : ''}` +
+      `${this.riding ? ' riding' : ''} ${this.teleporters.length} tele${spinning ? '(spinning)' : ''}`
+    )
   }
 
   get ambientCount(): number {
