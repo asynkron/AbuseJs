@@ -157,29 +157,29 @@ export class CeilingAnt extends Prop {
         break
 
       case 'walking': {
-        // Only take a new heading from the player when free to act on it.
-        // Turning towards them every tick while jammed against a wall made the
-        // ant flip its facing on every single frame - it read as a sprite
-        // vibrating in place rather than an animal stuck on a wall.
+        // Fall properly. The old version pushed a constant GRAVITY * 4 down
+        // every tick instead of accumulating velocity, so an ant that walked
+        // off a ledge descended at a fixed crawl - it looked like it was
+        // hanging in the air rather than falling.
+        this.vy = Math.min(this.vy + GRAVITY, MAX_FALL)
+        const drop = moveAndCollide(this.level, this, 0, this.vy)
+        if (drop.onGround) this.vy = 0
+
         // Close enough is close enough. Chasing to the exact pixel means
         // overshooting by a step, flipping the sign of dx, and walking back -
-        // every tick, which reads as a sprite vibrating rather than an animal.
-        // It is already touching the player at this range.
-        if (Math.abs(dx) < CHASE_DEADBAND) {
-          this.advanceAnimation(0)
-          break
-        }
+        // every tick. It is already touching the player at this range.
+        if (Math.abs(dx) < CHASE_DEADBAND) break
 
         if (this.turnCooldown > 0) this.turnCooldown--
         else this.direction = dx < 0 ? -1 : 1
 
+        // Horizontal movement is its own step, and only it decides whether the
+        // ant is blocked. Rolled into the same call as the fall, any tick that
+        // landed also read as "cannot move sideways", so an ant walking down a
+        // slope turned round on almost every step.
         const before = this.x
-        moveAndCollide(this.level, this, WALK_SPEED * this.direction, GRAVITY * 4)
+        moveAndCollide(this.level, this, WALK_SPEED * this.direction, 0)
 
-        // The cooldown has to gate the turn itself, not just the re-aim. An
-        // ant wedged somewhere it cannot leave is blocked on every tick, so
-        // turning each time it happens flips the facing every frame and the
-        // sprite vibrates in place instead of standing there stuck.
         if (Math.abs(this.x - before) < WALK_SPEED * 0.5 && this.turnCooldown === 0) {
           this.direction = -this.direction as 1 | -1
           this.turnCooldown = TURN_COMMIT
