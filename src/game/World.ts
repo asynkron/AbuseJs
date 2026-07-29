@@ -1006,6 +1006,13 @@ export class World {
    * Runs the save consoles: stand at one, press down, and the level id, your
    * position and everything you are carrying go to localStorage. It also moves
    * where dying puts you, which is the half of "save" that matters in play.
+   *
+   * `restart_ai` leaves the console on aistate 1 once it has been used - 0 is
+   * only ever the never-touched state - so a console is also a one-shot signal
+   * source, and the levels wire it like one: level02's door at 339,1274 is held
+   * shut by the console beside it, and level09, level17, level18, level21 and
+   * frabs18 gate doors, hidden walls and a dimmer the same way. That is why the
+   * signal is set here and never cleared.
    */
   private useConsoles(activating: boolean): void {
     for (const console of this.consoles) {
@@ -1031,6 +1038,7 @@ export class World {
       const ok = writeSave(state)
 
       console.setState('running', true)
+      if (console.objectIndex >= 0) this.logic.signals.setState(console.objectIndex, 1)
       this.consoleLit.set(console, CONSOLE_LIT_TICKS)
       this.savedMessage = ok ? CONSOLE_LIT_TICKS : 0
       this.audio.playNamed('SAVE_SND', { volume: 0.7, x: console.x, y: console.y })
