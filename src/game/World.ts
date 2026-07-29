@@ -10,6 +10,7 @@ import { LightLayer } from '../render/LightLayer'
 import { TileLayer } from '../render/TileLayer'
 import { Level } from './Level'
 import { Player } from './Player'
+import { Bullets } from './Bullets'
 import { buildPlatforms, type Platform } from './Platform'
 import { spawnProps, type Prop } from './Prop'
 import { buildTeleporters, type Teleporter } from './Teleporter'
@@ -76,6 +77,9 @@ export class World {
   /** The original status bar, in screen space. */
   readonly statusBar: StatusBar
 
+  /** Machine gun fire, drawn over the props but under the above-tiles. */
+  private readonly bullets = new Bullets()
+
   constructor(
     assets: GameAssets,
     readonly level: Level,
@@ -93,6 +97,7 @@ export class World {
       this.fgTiles.container,
       this.propLayer,
       this.entityLayer,
+      this.bullets.graphics,
       this.aboveTiles.container,
     )
     this.root.addChild(this.backdrop, this.scene)
@@ -151,6 +156,7 @@ export class World {
     this.player.update(input.state, input.consumeJump())
     this.ridePlatforms(activating)
     this.useTeleporters(activating)
+    this.fireWeapon(input.state.fire)
 
     this.camera.follow(this.player.x, this.player.y - this.player.height / 2, {
       width: this.level.widthPx,
@@ -199,6 +205,25 @@ export class World {
 
       if (activating) platform.trigger()
       return
+    }
+  }
+
+  /**
+   * Fires the machine gun and advances the shots already in the air.
+   *
+   * Impact sounds alternate at random between the two the original uses
+   * (lisp/weapons.lsp, mbullet_ai).
+   */
+  private fireWeapon(wantsToFire: boolean): void {
+    const shot = this.player.tryFire(wantsToFire)
+    if (shot) {
+      this.bullets.spawn(shot.x, shot.y, shot.angle)
+      this.audio.playNamed('MGUN_SND', { volume: 0.5, x: shot.x, y: shot.y })
+    }
+
+    for (const impact of this.bullets.update(this.level)) {
+      const which = Math.random() < 0.5 ? 'MG_HIT_SND1' : 'MG_HIT_SND2'
+      this.audio.playNamed(which, { volume: 0.6, x: impact.x, y: impact.y })
     }
   }
 
@@ -257,6 +282,7 @@ export class World {
 
     this.updateProps(camera.x, camera.y, viewW, viewH, alpha)
     this.player.draw(alpha)
+    this.bullets.draw()
 
     // Layers are placed in world space; the containers carry the camera offset.
     this.backdrop.position.set(-bgX, -bgY)
@@ -323,9 +349,11 @@ export class World {
   get platformStatus(): string {
     const moving = this.platforms.filter((p) => p.isMoving).length
     const spinning = this.teleporters.filter((t) => t.isCharging).length
+    const shots = this.bullets.liveCount
     return (
       `${this.platforms.length} plat${moving ? `(${moving} moving)` : ''}` +
-      `${this.riding ? ' riding' : ''} ${this.teleporters.length} tele${spinning ? '(spinning)' : ''}`
+      `${this.riding ? ' riding' : ''} ${this.teleporters.length} tele${spinning ? '(spinning)' : ''}` +
+      `${shots ? ` ${shots} shots` : ''}`
     )
   }
 
@@ -339,6 +367,7 @@ export class World {
    * few thousand sprites each time.
    */
   destroy(): void {
+    this.bullets.clear()
     this.lights.destroy()
     this.messages.destroy()
     this.statusBar.destroy()

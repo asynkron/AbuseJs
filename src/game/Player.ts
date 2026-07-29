@@ -42,6 +42,24 @@ const TOP_CHARACTER = 'MGUN_TOP'
 const TOP_BASELINE = 29
 const TOP_FLIP_NUDGE = 4
 
+/**
+ * Where the gun's muzzle sits for each of the torso's 24 aim frames, as
+ * (x, right) / (y, up) offsets from the player's anchor.
+ *
+ * Straight from `small_fire_off` in src/cop.cpp - "x & y offset from character
+ * to end of gun". Without it, shots leave from the player's feet instead of
+ * the barrel.
+ */
+const MUZZLE_OFFSETS: readonly (readonly [number, number])[] = [
+  [17, 20], [17, 23], [17, 28], [15, 33], [11, 39], [7, 43],
+  [-3, 44], [-10, 42], [-16, 39], [-20, 34], [-20, 28], [-20, 25],
+  [-19, 20], [-19, 16], [-16, 14], [-14, 11], [-11, 9], [-7, 8],
+  [-3, 8], [2, 8], [6, 9], [10, 10], [14, 13], [16, 15],
+]
+
+/** Ticks between shots, from `fire_delay1` in lisp/people.lsp. */
+const FIRE_DELAY = 3
+
 export class Player extends Entity {
   /** Torso sprite, drawn over the legs. */
   readonly topSprite = new Sprite()
@@ -55,6 +73,7 @@ export class Player extends Entity {
   private readonly topFrames: Frame[]
   private coyote = 0
   private jumpBuffer = 0
+  private fireCooldown = 0
   /** Set while a jump is rising and the cutoff has not been spent yet. */
   private jumpCutArmed = false
 
@@ -199,13 +218,44 @@ export class Player extends Entity {
     this.topSprite.y = y - frame.height + 1
   }
 
-  /** Picks the aim frame, accounting for the sprite being mirrored. */
-  private topFrame(): Frame | undefined {
+  /** Which of the 24 aim frames the torso is showing. */
+  private get topFrameIndex(): number {
     const count = this.topFrames.length
-    if (count === 0) return undefined
+    if (count === 0) return 0
     // Frame 0 aims due right; mirroring the sprite mirrors the angle too.
     const angle = this.direction >= 0 ? this.aimAngle : 180 - this.aimAngle
     const normalized = ((angle % 360) + 360) % 360
-    return this.topFrames[Math.round((normalized / 360) * count) % count]
+    return Math.round((normalized / 360) * count) % count
+  }
+
+  /** Picks the aim frame, accounting for the sprite being mirrored. */
+  private topFrame(): Frame | undefined {
+    return this.topFrames[this.topFrameIndex]
+  }
+
+  /**
+   * The point shots leave from: the end of the gun for the current aim frame,
+   * mirrored when facing left.
+   */
+  get muzzle(): { x: number; y: number } {
+    const offset = MUZZLE_OFFSETS[this.topFrameIndex] ?? MUZZLE_OFFSETS[0]
+    const flipped = this.direction < 0
+    return {
+      x: this.x + (flipped ? TOP_FLIP_NUDGE - offset[0] : offset[0]),
+      y: this.y - offset[1],
+    }
+  }
+
+  /**
+   * Consumes a shot if the gun is ready. Returns the muzzle and the angle to
+   * fire along, or null while cooling down.
+   */
+  tryFire(wantsToFire: boolean): { x: number; y: number; angle: number } | null {
+    if (this.fireCooldown > 0) this.fireCooldown--
+    if (!wantsToFire || this.fireCooldown > 0) return null
+
+    this.fireCooldown = FIRE_DELAY
+    const { x, y } = this.muzzle
+    return { x, y, angle: this.aimAngle }
   }
 }

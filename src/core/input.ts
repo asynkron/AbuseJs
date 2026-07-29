@@ -7,6 +7,8 @@ export interface InputState {
   run: boolean
   /** Use / enter - the original's "action key". */
   action: boolean
+  /** Left mouse button. */
+  fire: boolean
 }
 
 const BINDINGS: Record<string, keyof InputState> = {
@@ -37,6 +39,7 @@ export class Input {
     jump: false,
     run: false,
     action: false,
+    fire: false,
   }
 
   /** Latest pointer position in CSS pixels, for aiming. */
@@ -56,6 +59,15 @@ export class Input {
       this.pointer.x = e.clientX
       this.pointer.y = e.clientY
       this.pointer.seen = true
+    })
+    window.addEventListener('pointerdown', (e) => {
+      // Left button only; the panel's sliders live on the same surface.
+      if (e.button === 0 && !(e.target as HTMLElement)?.closest?.('#controls')) {
+        this.state.fire = true
+      }
+    })
+    window.addEventListener('pointerup', (e) => {
+      if (e.button === 0) this.state.fire = false
     })
   }
 
