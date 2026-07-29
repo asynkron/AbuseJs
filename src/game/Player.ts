@@ -67,6 +67,8 @@ const MUZZLE_OFFSETS: readonly (readonly [number, number])[] = [
 const FIRE_DELAY_DRY = 7
 /** A weapon swap costs a beat, so cycling is not a free rate-of-fire boost. */
 const WEAPON_SWITCH_DELAY = 8
+/** Ticks a surface that is an object, not a tile, keeps counting as ground. */
+const OBJECT_SUPPORT_TICKS = 4
 /** How fast FLY climbs and sinks. */
 const FLY_SPEED = 2.2
 /** HEAL restores one point every this many ticks while held. */
@@ -128,6 +130,7 @@ export class Player extends Entity {
   }
 
   private coyote = 0
+  private objectSupport = 0
   private jumpBuffer = 0
   private fireCooldown = 0
   /** Set while a jump is rising and the cutoff has not been spent yet. */
@@ -227,7 +230,12 @@ export class Player extends Entity {
     if (result.hitWall) this.vx = 0
     if (result.hitCeiling && this.vy < 0) this.vy = 0
 
-    const grounded = result.onGround || isGrounded(this.level, this)
+    // Objects hold you up too - platforms, doors, hidden walls - and none of
+    // them are tiles. Without this the legs never run while you walk across a
+    // hidden wall: `grounded` is false, so the state machine picks the falling
+    // frame and the cop appears to hover.
+    if (this.objectSupport > 0) this.objectSupport--
+    const grounded = result.onGround || isGrounded(this.level, this) || this.objectSupport > 0
     if (grounded) {
       if (this.vy > 0) this.vy = 0
       this.coyote = PHYSICS.coyoteTicks
@@ -298,6 +306,10 @@ export class Player extends Entity {
    * player can stand on a platform but never jump off it.
    */
   landOn(surfaceY: number): void {
+    // Held for a few ticks: gravity has to pull the player back into whatever
+    // is carrying them before the next overlap is detected, and they should
+    // not flicker into a fall in between.
+    this.objectSupport = OBJECT_SUPPORT_TICKS
     this.y = surfaceY
     if (this.vy > 0) this.vy = 0
     this.onGround = true
