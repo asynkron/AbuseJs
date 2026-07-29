@@ -386,7 +386,10 @@ export class World {
     // focus list and sets `in_climbing_area` on the cop before its own handler
     // is reached.
     this.player.climbDepth = climbDepth(this.ladders, this.player.x, this.player.y)
-    this.player.climbCentreX = ladderAt(this.ladders, this.player.x, this.player.y)?.centreX ?? null
+    const ladder = ladderAt(this.ladders, this.player.x, this.player.y)
+    this.player.climbCentreX = ladder?.centreX ?? null
+    this.player.climbTop = ladder?.top ?? null
+    this.player.climbBottom = ladder?.bottom ?? null
     if (this.player.climbDepth !== null && !this.player.isClimbing) {
       this.messages.prompt('Press up to climb')
     }

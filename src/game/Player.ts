@@ -7,7 +7,7 @@ import { Level } from './Level'
 import { CLIMB_FRAME_PITCH, CLIMB_OFF_RANGE, CLIMB_OFF_RISE, CLIMB_SPEED } from './Ladders'
 import { BASE_HEALTH_CAP, drawsTorso, scaleDamage, type PowerVisuals } from './powers'
 import { TORSO_FALLBACK, WEAPON_SLOTS, type WeaponSlot } from './weapons/index'
-import { isGrounded, moveAndCollide } from './collision'
+import { isBlocked, isGrounded, moveAndCollide } from './collision'
 
 /**
  * Our own platformer feel - not a reimplementation of Abuse's movement.
@@ -192,6 +192,14 @@ export class Player extends Entity {
   climbDepth: number | null = null
   /** Where the ladder pulls the cop to horizontally while climbing. */
   climbCentreX: number | null = null
+  /** The shaft's ends, so climbing cannot leave it. */
+  climbTop: number | null = null
+  climbBottom: number | null = null
+
+  /** Is there room for the cop to stand here, rather than inside something? */
+  private canStandAt(x: number, y: number): boolean {
+    return !isBlocked(this.level, { x, y, halfWidth: this.halfWidth, height: this.height })
+  }
 
   get isClimbing(): boolean {
     return this.state === 'climbing'
@@ -310,16 +318,31 @@ export class Player extends Entity {
     }
 
     if (input.up) {
-      if (depth < CLIMB_OFF_RANGE) {
-        // At the top the cop steps up onto it rather than climbing into air.
+      // At the top the cop steps up onto it - but only if there is anywhere to
+      // step. Doing it unconditionally put him inside the platform capping the
+      // shaft, where the normal physics had no way to resolve him and the only
+      // way out was reloading.
+      if (depth < CLIMB_OFF_RANGE && this.canStandAt(this.x, this.y - CLIMB_OFF_RISE)) {
         this.y -= CLIMB_OFF_RISE
         this.setState('stopped', true)
         this.climbDepth = null
         return true
       }
-      this.y -= CLIMB_SPEED
+      // Bounded by the shaft the markers describe. Without this the cop kept
+      // going past the top of the ladder and through whatever was above it.
+      if (this.climbTop === null || this.y - CLIMB_SPEED > this.climbTop) {
+        this.y -= CLIMB_SPEED
+      }
     } else if (input.down) {
-      this.y += CLIMB_SPEED
+      if (this.climbBottom === null || this.y + CLIMB_SPEED < this.climbBottom) {
+        this.y += CLIMB_SPEED
+      } else if (this.canStandAt(this.x, this.climbBottom)) {
+        // Off the bottom onto the floor, rather than stopping in mid-air.
+        this.y = this.climbBottom
+        this.setState('stopped', true)
+        this.climbDepth = null
+        return true
+      }
     }
 
     // The frame comes from how far up the ladder he is, not from a clock.
