@@ -182,8 +182,11 @@ Two deliberate differences from the original:
   size.
 
 The additive passes (0.24 ghosting + 0.32 bloom) lift the blacks noticeably on Abuse's dark art.
-That is what the original does, so rather than change its constants there are **brightness and
-contrast sliders in the top right** that trim the result. Both default to `1.2`. They are applied
+That is what the original does, so rather than change its constants there are **brightness,
+contrast and glow sliders in the top right**. Glow scales both additive passes together — they are
+the same physical thing, light from one part of the tube landing on another, and separating them
+only gives two sliders that have to be kept in agreement. 1 is the authored amount; 0 leaves the
+picture sharp. The brightness and contrast trims that trim the result. Both default to `1.2`. They are applied
 last and outside the intensity mix, so they also correct the raw image with the CRT toggled off,
 and they persist in `localStorage`. `new CrtFilter({ intensity })` dials the whole pass back
 instead.

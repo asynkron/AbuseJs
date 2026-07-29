@@ -35,6 +35,7 @@ uniform vec4 uInputClamp;
 uniform float uTime;
 uniform float uPixelScale;
 uniform float uGridPeriod;
+uniform float uGlow;
 uniform float uIntensity;
 uniform vec2 uScreenSize;
 uniform float uBrightness;
@@ -82,9 +83,12 @@ void main() {
 
     // --- convergence error ------------------------------------------------
     // Two faint copies, shifted horizontally, added on top.
+    // uGlow scales both additive passes together: they are the same physical
+    // thing - light from one part of the tube landing on another - and pulling
+    // them apart just gives two sliders that have to be kept in agreement.
     vec2 ghost = vec2(GHOST_OFFSET * px, 0.0) / size;
-    color += GHOST_ALPHA * sampleScene(warped - ghost);
-    color += GHOST_ALPHA * sampleScene(warped + vec2(ghost.x, -px / size.y));
+    color += GHOST_ALPHA * uGlow * sampleScene(warped - ghost);
+    color += GHOST_ALPHA * uGlow * sampleScene(warped + vec2(ghost.x, -px / size.y));
 
     // --- phosphor bloom ---------------------------------------------------
     // Stands in for the original's quarter-res buffer drawn back additively.
@@ -94,7 +98,7 @@ void main() {
         float a = float(i) * 0.7853981634; // 2pi / 8
         bloom += sampleScene(warped + vec2(cos(a), sin(a)) * radius);
     }
-    color += (bloom / 8.0) * BLOOM_ALPHA;
+    color += (bloom / 8.0) * BLOOM_ALPHA * uGlow;
 
     // Everything on the glass - the shadow mask, the beam's own scanlines, the
     // rolling band - lives on the curved surface, so it is measured in the
@@ -162,6 +166,8 @@ export interface CrtOptions {
   /** Device pixels per unit of the original 960x540 present space. */
   pixelScale?: number
   gridPeriod?: number
+  /** Multiplies the bloom and convergence ghosting. 1 is the authored amount. */
+  glow?: number
   /** 0 = untouched, 1 = full effect. */
   intensity?: number
   /** 1 = unchanged. Applied after the CRT pass. */
@@ -176,6 +182,7 @@ export class CrtFilter extends Filter {
       uTime: { value: 0, type: 'f32' },
       uPixelScale: { value: options.pixelScale ?? 2, type: 'f32' },
       uGridPeriod: { value: options.gridPeriod ?? 6, type: 'f32' },
+      uGlow: { value: options.glow ?? 1, type: 'f32' },
       uIntensity: { value: options.intensity ?? 1, type: 'f32' },
       uScreenSize: { value: new Float32Array([960, 540]), type: 'vec2<f32>' },
       uBrightness: { value: options.brightness ?? 1.2, type: 'f32' },
@@ -200,6 +207,7 @@ export class CrtFilter extends Filter {
       uTime: number
       uPixelScale: number
       uGridPeriod: number
+      uGlow: number
       uIntensity: number
       uScreenSize: Float32Array
       uBrightness: number
@@ -219,6 +227,18 @@ export class CrtFilter extends Filter {
   /** Screen-space size of one scanline/grille cycle. See `crtGridPeriod`. */
   set gridPeriod(value: number) {
     this.uniforms.uGridPeriod = value
+  }
+
+  /**
+   * How much bloom and convergence ghosting to add. 1 is the amount the
+   * original effect was authored with; 0 leaves the picture sharp.
+   */
+  get glow(): number {
+    return this.uniforms.uGlow
+  }
+
+  set glow(value: number) {
+    this.uniforms.uGlow = value
   }
 
   /** Size of the filtered area in device pixels. */
