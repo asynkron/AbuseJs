@@ -21,6 +21,18 @@ export const CLIMB_SPEED = 3
 export const CLIMB_OFF_RANGE = 32
 /** How far stepping off lifts the cop - `(set_y (- (y) 28))`. */
 export const CLIMB_OFF_RISE = 28
+/** Pixels of climb per frame of the ten-frame `4lad` cycle. */
+export const CLIMB_FRAME_PITCH = 6
+/**
+ * Grace at the foot of a ladder.
+ *
+ * The markers describe the shaft, not the floor at the bottom of it, and the
+ * floor is usually a few pixels lower - so standing at the foot of a ladder
+ * put the cop just outside the box and the ladder could not be grabbed at all
+ * from the one place you always approach it from. The top needed the same
+ * allowance for the same reason, and got CLIMB_OFF_RISE.
+ */
+export const CLIMB_FOOT_GRACE = 34
 
 export interface Ladder {
   /** The rectangle you can climb in, in world pixels. */
@@ -40,7 +52,11 @@ export interface Ladder {
 export function climbDepth(ladders: readonly Ladder[], x: number, y: number): number | null {
   for (const ladder of ladders) {
     if (x < ladder.left || x > ladder.right) continue
-    if (y < ladder.top || y > ladder.bottom) continue
+    // The lip above the top counts as on the ladder. `climb_off_handler` puts
+    // the cop CLIMB_OFF_RISE above it when he steps up, so without this the
+    // one place you always stand after climbing is the one place you cannot
+    // climb back down from.
+    if (y < ladder.top - CLIMB_OFF_RISE || y > ladder.bottom + CLIMB_FOOT_GRACE) continue
     return y - ladder.top
   }
   return null
@@ -50,7 +66,7 @@ export function climbDepth(ladders: readonly Ladder[], x: number, y: number): nu
 export function ladderAt(ladders: readonly Ladder[], x: number, y: number): Ladder | null {
   for (const ladder of ladders) {
     if (x < ladder.left || x > ladder.right) continue
-    if (y < ladder.top || y > ladder.bottom) continue
+    if (y < ladder.top - CLIMB_OFF_RISE || y > ladder.bottom + CLIMB_FOOT_GRACE) continue
     return ladder
   }
   return null

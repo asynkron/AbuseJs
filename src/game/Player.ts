@@ -4,7 +4,7 @@ import type { Frame, GameAssets } from '../assets/loader'
 import type { InputState } from '../core/input'
 import { Entity } from './Entity'
 import { Level } from './Level'
-import { CLIMB_OFF_RANGE, CLIMB_OFF_RISE, CLIMB_SPEED } from './Ladders'
+import { CLIMB_FRAME_PITCH, CLIMB_OFF_RANGE, CLIMB_OFF_RISE, CLIMB_SPEED } from './Ladders'
 import { BASE_HEALTH_CAP, drawsTorso, scaleDamage, type PowerVisuals } from './powers'
 import { TORSO_FALLBACK, WEAPON_SLOTS, type WeaponSlot } from './weapons/index'
 import { isGrounded, moveAndCollide } from './collision'
@@ -294,8 +294,10 @@ export class Player extends Entity {
     const depth = this.climbDepth ?? 0
 
     if (!this.isClimbing) {
-      // Grabbed by pressing up; walking past a ladder should not stick to it.
-      if (!input.up) return false
+      // Grabbed with either direction: up from the foot of it, down from the
+      // lip at the top, which is where stepping off leaves you. Walking past
+      // must not stick, so a bare walk does not grab.
+      if (!input.up && !input.down) return false
       this.setState('climbing', true)
       this.vx = 0
       this.vy = 0
@@ -316,11 +318,19 @@ export class Player extends Entity {
         return true
       }
       this.y -= CLIMB_SPEED
-      this.advanceAnimation(CLIMB_SPEED / 6)
     } else if (input.down) {
       this.y += CLIMB_SPEED
-      this.advanceAnimation(-CLIMB_SPEED / 6)
     }
+
+    // The frame comes from how far up the ladder he is, not from a clock.
+    // `advanceAnimation` only ever counts forwards - its `while (clock >= 1)`
+    // cannot run backwards - so driving it with a negative amount froze the
+    // picture on the way down. Position drives it, and it reads correctly in
+    // both directions for free.
+    const cycle = this.frameCount || 1
+    this.setFrame(
+      ((Math.floor(-this.y / CLIMB_FRAME_PITCH) % cycle) + cycle) % cycle,
+    )
 
     // `latter_check_area` recentres a climbing cop between the two markers.
     if (this.climbCentreX !== null) {

@@ -48,7 +48,10 @@ export function showTitleScreen(options: { canResume: boolean; skip: boolean }):
   let difficulty = storedDifficulty()
 
   if (options.skip || !root || !newGame || !loadGame) {
-    return Promise.resolve({ difficulty, resume: options.canResume })
+    // Skipping means a deep link, which is an explicit request for *that*
+    // level - resuming would quietly send you somewhere else instead. Only a
+    // real press of Load Saved Game resumes.
+    return Promise.resolve({ difficulty, resume: false })
   }
 
   const buttons = [...root.querySelectorAll<HTMLButtonElement>('[data-difficulty]')]
