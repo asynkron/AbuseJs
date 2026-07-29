@@ -182,11 +182,11 @@ export class CrtFilter extends Filter {
       uTime: { value: 0, type: 'f32' },
       uPixelScale: { value: options.pixelScale ?? 2, type: 'f32' },
       uGridPeriod: { value: options.gridPeriod ?? 6, type: 'f32' },
-      uGlow: { value: options.glow ?? 1, type: 'f32' },
+      uGlow: { value: options.glow ?? 2, type: 'f32' },
       uIntensity: { value: options.intensity ?? 1, type: 'f32' },
       uScreenSize: { value: new Float32Array([960, 540]), type: 'vec2<f32>' },
-      uBrightness: { value: options.brightness ?? 1.2, type: 'f32' },
-      uContrast: { value: options.contrast ?? 1.2, type: 'f32' },
+      uBrightness: { value: options.brightness ?? 1.05, type: 'f32' },
+      uContrast: { value: options.contrast ?? 1.21, type: 'f32' },
     })
 
     super({

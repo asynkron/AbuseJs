@@ -41,11 +41,21 @@ function say(message: string): void {
 
 const PICTURE_KEY = 'abusejs.picture'
 /**
- * Not 1.0/1.0: the CRT pass's additive ghosting and bloom wash the image out,
- * and this is the trim that reads best against Abuse's dark art. Volume starts
- * at 0 on purpose - a page should not start screaming at you.
+ * Where the sliders start, and none of it is 1.0.
+ *
+ * The CRT pass's additive ghosting washes the image out, so brightness is
+ * trimmed *below* one and the contrast put back on top of it; the glow is what
+ * gives the new blast lights and embers their bloom, and at 1 they read flat.
+ * These are hand-picked against Abuse's dark art rather than derived.
+ *
+ * Volume starts at half rather than off. Nothing can actually sound until the
+ * title screen is clicked - that gesture is what unlocks the AudioContext - so
+ * there is no way for the page to start making noise at somebody unasked.
+ *
+ * The same four numbers appear as the `value` attributes in index.html and as
+ * CrtFilter's own fallbacks. Keep the three in step.
  */
-const PICTURE_DEFAULTS = { brightness: 1.2, contrast: 1.2, glow: 1, volume: 0 }
+const PICTURE_DEFAULTS = { brightness: 1.05, contrast: 1.21, glow: 2, volume: 0.5 }
 
 function loadPictureSettings(): typeof PICTURE_DEFAULTS {
   try {
