@@ -1,5 +1,5 @@
 import type { Player } from './Player'
-import type { PowerKind } from './Weapons'
+import type { PowerKind } from './powers'
 
 /**
  * The save consoles, and what they write.
@@ -25,8 +25,11 @@ export interface SaveState {
   health: number
   magazines: number[]
   weapon: number
+  /**
+   * The power in hand. There is no charge to save alongside it: a power is
+   * cleared by `restart_player` and by nothing else, so it lasts until you die.
+   */
   power: PowerKind | null
-  powerCharge: number
   kills: number
   /** Wall-clock stamp, so a save can be reported as recent or stale. */
   at: number
@@ -68,6 +71,7 @@ export function clearSave(): void {
 export function snapshot(
   level: string,
   player: Player,
+  power: PowerKind | null,
   at: { x: number; y: number },
   kills: number,
   now: number,
@@ -79,20 +83,20 @@ export function snapshot(
     health: player.health,
     magazines: [...player.magazines],
     weapon: player.weapon,
-    power: player.power,
-    powerCharge: player.powerCharge,
+    power,
     kills,
     at: now,
   }
 }
 
-/** Puts a save back into a player. Position is the caller's business. */
+/**
+ * Puts a save back into a player. Position and the power are the caller's
+ * business - the power lives in the world's `Powers`, not on the cop.
+ */
 export function restore(player: Player, state: SaveState): void {
   player.health = state.health
   state.magazines.forEach((rounds, slot) => {
     if (slot < player.magazines.length) player.magazines[slot] = rounds
   })
   player.weapon = Math.min(Math.max(0, state.weapon | 0), player.magazines.length - 1)
-  player.power = state.power
-  player.powerCharge = state.powerCharge
 }

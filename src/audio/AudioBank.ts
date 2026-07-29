@@ -189,10 +189,24 @@ export class AudioBank {
     })
   }
 
-  /** Plays a clip by its lisp symbol, e.g. `APPEAR_SND`. */
+  /**
+   * Plays a clip by its lisp symbol, e.g. `APPEAR_SND`.
+   *
+   * A handful of symbols name a list rather than a sample - `ASML_DEATH` and
+   * `ALRG_DEATH` in lisp/sfx.lsp are two-entry arrays, and the scripts play
+   * them with `(aref ASML_DEATH (random 2))`. Those resolve here too, picking
+   * an entry at random, so callers need not know which kind they hold.
+   */
   playNamed(name: string, options: PlayOptions = {}): void {
-    const path = this.pathFor(name)
+    const path = this.pathFor(name) ?? this.randomFromArray(name)
     if (path) this.play(path, options)
+  }
+
+  private randomFromArray(name: string): string | undefined {
+    const entries = this.manifest.arrays[name]
+    if (!entries?.length) return undefined
+    const available = entries.filter((path): path is string => path !== null)
+    return available[Math.floor(Math.random() * available.length)]
   }
 
   get loadedCount(): number {

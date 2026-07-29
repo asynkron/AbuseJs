@@ -1,10 +1,11 @@
-import { Sprite } from 'pixi.js'
+import { Container, Sprite } from 'pixi.js'
 
 import type { Frame, GameAssets } from '../assets/loader'
 import type { InputState } from '../core/input'
 import { Entity } from './Entity'
 import { Level } from './Level'
-import { POWER_CHARGE, WEAPONS, type PowerKind, type WeaponDef } from './Weapons'
+import { BASE_HEALTH_CAP, drawsTorso, scaleDamage, type PowerVisuals } from './powers'
+import { TORSO_FALLBACK, WEAPON_SLOTS, type WeaponSlot } from './weapons/index'
 import { isGrounded, moveAndCollide } from './collision'
 
 /**
@@ -58,22 +59,10 @@ const MUZZLE_OFFSETS: readonly (readonly [number, number])[] = [
   [-3, 8], [2, 8], [6, 9], [10, 10], [14, 13], [16, 15],
 ]
 
-/**
- * Ticks between shots. The original slows the gun right down when you are out
- * of ammo rather than stopping it - 3 with, 7 without (lisp/people.lsp,
- * `laser_ufun`), which is what "collect ammo to increase firing speed" in the
- * tutorial is telling you.
- */
-const FIRE_DELAY_DRY = 7
 /** A weapon swap costs a beat, so cycling is not a free rate-of-fire boost. */
 const WEAPON_SWITCH_DELAY = 8
 /** Ticks a surface that is an object, not a tile, keeps counting as ground. */
 const OBJECT_SUPPORT_TICKS = 4
-/** How fast FLY climbs and sinks. */
-const FLY_SPEED = 2.2
-/** HEAL restores one point every this many ticks while held. */
-const HEAL_EVERY = 8
-const MAX_HEALTH = 100
 /** Rounds the cop starts a level with. */
 const STARTING_AMMO = 50
 /** Ticks of invulnerability after being hit, so one turret cannot chain-kill. */
@@ -81,34 +70,54 @@ const HURT_INVULNERABLE = 30
 /** Ticks the death animation holds before respawning. */
 const DEATH_TICKS = 120
 
+/** How a power renames the leg animations, when one is being held. */
+export interface LegStateFilter {
+  legState(base: string): string
+}
+
 export class Player extends Entity {
   /** Torso sprite, drawn over the legs. */
   readonly topSprite = new Sprite()
+  /** FAST's trailing copies, drawn behind the live cop. */
+  readonly ghostLayer = new Container()
 
   onGround = false
   /** Aim direction in degrees, counter-clockwise from due right. */
   aimAngle = 0
-  /** Nothing damages the player yet; this is what the status bar shows. */
   health: number
   /** Rounds per weapon slot. Firing dry still works, just far slower. */
-  readonly magazines: number[] = WEAPONS.map((_, i) => (i === 0 ? STARTING_AMMO : 0))
-  /** Which of `WEAPONS` is in hand. */
+  readonly magazines: number[] = WEAPON_SLOTS.map((_, i) => (i === 0 ? STARTING_AMMO : 0))
+  /** Which of `WEAPON_SLOTS` is in hand. */
   weapon = 0
 
-  /** The power the special button spends, and how much of it is left. */
-  power: PowerKind | null = null
-  powerCharge = 0
-  /** True on ticks the special is actually running, for everything that reads it. */
-  powerActive = false
+  /**
+   * Set by the world to the `Powers` in hand, so DARNEL's `fast_*` and `fly_*`
+   * sets go on screen while a power is running. Left alone it draws plain.
+   */
+  legStates: LegStateFilter = { legState: (base) => base }
 
   private invulnerable = 0
   private deathTimer = 0
-  private healTick = 0
   /** Torso frames per weapon, resolved once. */
   private readonly topsByWeapon: Frame[][] = []
+  /** One legs-and-torso pair per FAST ghost, grown on demand. */
+  private readonly ghosts: { legs: Sprite; torso: Sprite }[] = []
 
   private get topFrames(): Frame[] {
     return this.topsByWeapon[this.weapon] ?? this.topsByWeapon[0] ?? []
+  }
+
+  /**
+   * `give_player_health` writes through a field the engine calls `hp`. This is
+   * an alias rather than a rename: `health` is the name the status bar and the
+   * save file have always used.
+   */
+  get hp(): number {
+    return this.health
+  }
+
+  set hp(value: number) {
+    this.health = value
   }
 
   /** Rounds for the weapon in hand. */
@@ -116,8 +125,8 @@ export class Player extends Entity {
     return this.magazines[this.weapon]
   }
 
-  get weaponDef(): WeaponDef {
-    return WEAPONS[this.weapon]
+  get weaponSlot(): WeaponSlot {
+    return WEAPON_SLOTS[this.weapon]
   }
 
   get isDead(): boolean {
@@ -143,13 +152,27 @@ export class Player extends Entity {
     super(assets, 'DARNEL')
     this.halfWidth = 7
     this.height = 28
-    // One torso per weapon, so the cop is visibly holding what he fires. Two
-    // weapons never got their own and fall back to the machine gun's.
-    for (const weapon of WEAPONS) {
-      const frames = assets.animation(weapon.top, 'stopped')
-      this.topsByWeapon.push(frames.length ? frames : assets.animation(TOP_CHARACTER, 'stopped'))
+    // One torso per weapon, so the cop is visibly holding what he fires.
+    // DRAY_TOP is built by the fRaBs Twist addon, which the converter does not
+    // read, so its 24 frames are addressed by name; anything still missing
+    // falls back to the machine gun's.
+    for (const slot of WEAPON_SLOTS) {
+      this.topsByWeapon.push(this.torsoFrames(assets, slot.top))
     }
-    this.health = assets.ability('DARNEL', 'start_hp') ?? 100
+    this.health = assets.ability('DARNEL', 'start_hp') ?? BASE_HEALTH_CAP
+  }
+
+  private torsoFrames(assets: GameAssets, character: string): Frame[] {
+    const declared = assets.animation(character, 'stopped')
+    if (declared.length) return declared
+
+    const fallback = TORSO_FALLBACK[character]
+    const loose = fallback
+      ? fallback.frames
+          .map((name) => assets.frame(fallback.file, name))
+          .filter((frame): frame is Frame => frame !== undefined)
+      : []
+    return loose.length ? loose : assets.animation(TOP_CHARACTER, 'stopped')
   }
 
   /** Points the torso at a world-space position. */
@@ -209,22 +232,10 @@ export class Player extends Entity {
       this.jumpCutArmed = false
     }
 
-    if (this.powerActive && this.power === 'fly') {
-      // FLY is a hover, not a jetpack: up climbs, down sinks, and letting go
-      // of both simply holds height.
-      const climb = (input.up ? -1 : 0) + (input.down ? 1 : 0)
-      this.vy = climb * FLY_SPEED
-    } else {
-      this.vy = Math.min(this.vy + PHYSICS.gravity, PHYSICS.maxFall)
-    }
-
-    if (this.powerActive && this.power === 'health' && this.health < MAX_HEALTH) {
-      this.healTick++
-      if (this.healTick >= HEAL_EVERY) {
-        this.healTick = 0
-        this.health = Math.min(MAX_HEALTH, this.health + 1)
-      }
-    }
+    // Gravity is never turned off, FLY included: that power pushes an impulse
+    // into vy every tick and the hover is the balance between the two
+    // (lisp/people.lsp do_special_power). It has already run for this tick.
+    this.vy = Math.min(this.vy + PHYSICS.gravity, PHYSICS.maxFall)
 
     const result = moveAndCollide(this.level, this, this.vx, this.vy)
     if (result.hitWall) this.vx = 0
@@ -245,25 +256,36 @@ export class Player extends Entity {
     }
     this.onGround = grounded
 
-    this.updateAnimation(running)
+    this.updateAnimation()
   }
 
-  private updateAnimation(running: boolean): void {
+  /**
+   * Picks the leg animation. Every name goes through the power's filter, which
+   * is what puts DARNEL's `fast_*` and `fly_*` sets on screen - and only while
+   * the special is actually held, so the powered art reads as the power being
+   * used rather than as a second run cycle for sprinting.
+   */
+  private updateAnimation(): void {
     if (!this.onGround) {
-      const rising = this.vy < 0
-      this.setState(rising ? 'run_jump' : 'run_jump_fall')
+      this.setLegState(this.vy < 0 ? 'run_jump' : 'run_jump_fall')
       return
     }
 
     if (Math.abs(this.vx) > 0.15) {
-      const wanted = running && this.assets.hasState(this.character, 'fast_running') ? 'fast_running' : 'running'
-      this.setState(wanted)
-      // Tying the cycle to distance travelled keeps the feet from sliding.
+      this.setLegState('running')
+      // Tying the cycle to distance travelled keeps the feet from sliding, and
+      // is why sprinting needs no animation of its own - the same cycle simply
+      // plays faster.
       this.advanceAnimation(Math.abs(this.vx) * RUN_CYCLE)
     } else {
-      this.setState('stopped')
+      this.setLegState('stopped')
       this.advanceAnimation(IDLE_FPS / 60)
     }
+  }
+
+  /** `setState` with the held power's prefix applied. */
+  setLegState(base: string): void {
+    this.setState(this.legStates.legState(base))
   }
 
   /**
@@ -277,7 +299,11 @@ export class Player extends Entity {
     // the respawn never gets a tick to happen in.
     if (this.health <= 0) return false
 
-    this.health = Math.max(0, this.health - amount)
+    // `bottom_damage` scales the hit by the difficulty global before anything
+    // else touches it (lisp/people.lsp). The default is hard, which is x1, so
+    // this changes nothing today - it names the multiplier rather than leaving
+    // it implicit.
+    this.health = Math.max(0, this.health - scaleDamage(amount))
     this.invulnerable = HURT_INVULNERABLE
     if (this.health > 0) return false
 
@@ -291,7 +317,7 @@ export class Player extends Entity {
     this.setPosition(x, y)
     this.vx = 0
     this.vy = 0
-    this.health = this.assets.ability('DARNEL', 'start_hp') ?? 100
+    this.health = this.assets.ability('DARNEL', 'start_hp') ?? BASE_HEALTH_CAP
     // Ammo survives a death; only the machine gun is topped back up.
     this.magazines[0] = Math.max(this.magazines[0], STARTING_AMMO)
     this.deathTimer = 0
@@ -339,7 +365,10 @@ export class Player extends Entity {
     this.sprite.alpha = blink ? 0.35 : 1
     this.topSprite.alpha = this.sprite.alpha
 
-    this.topSprite.visible = !this.isDead
+    // `top_draw_state` (lisp/people.lsp) names the leg states the torso is
+    // drawn over. The powered sets are not among them, which is why the cop
+    // has no gun while FLY or FAST is held - nor on a ladder, once there is one.
+    this.topSprite.visible = !this.isDead && drawsTorso(this.state)
     this.topSprite.texture = frame.texture
 
     const x = this.prevX + (this.x - this.prevX) * alpha + (this.direction < 0 ? TOP_FLIP_NUDGE : 0)
@@ -388,7 +417,7 @@ export class Player extends Entity {
    * gun is the exception, since the cop always has that one.
    */
   selectWeapon(slot: number): boolean {
-    if (slot < 0 || slot >= WEAPONS.length) return false
+    if (slot < 0 || slot >= WEAPON_SLOTS.length) return false
     if (slot !== 0 && this.magazines[slot] <= 0) return false
     if (slot === this.weapon) return false
     this.weapon = slot
@@ -398,7 +427,7 @@ export class Player extends Entity {
 
   /** Steps to the next slot that has something in it, in either direction. */
   cycleWeapon(step: number): boolean {
-    const n = WEAPONS.length
+    const n = WEAPON_SLOTS.length
     for (let i = 1; i <= n; i++) {
       const slot = (((this.weapon + step * i) % n) + n) % n
       if (slot === 0 || this.magazines[slot] > 0) return this.selectWeapon(slot)
@@ -406,73 +435,106 @@ export class Player extends Entity {
     return false
   }
 
-  /** Takes on a power, replacing whatever was held. */
-  givePower(kind: PowerKind): void {
-    this.power = kind
-    this.powerCharge = POWER_CHARGE
+  /**
+   * Burns ticks off the weapon cooldown. FAST's second effect: the original
+   * reaches into the torso and decrements `fire_delay1` directly, which speeds
+   * up every weapon rather than any one of them.
+   */
+  coolWeapon(ticks: number): void {
+    this.fireCooldown = Math.max(0, this.fireCooldown - ticks)
   }
 
   /**
-   * Runs the special. It is held, not toggled - the charge only drains while
-   * the button is down, which is what "hold down the right mouse button" in
-   * the tutorial means.
+   * Consumes a shot if the gun is ready.
+   *
+   * Returns null while cooling down, and on an empty magazine for the seven
+   * weapons that are simply not there to be fired. The machine gun is the
+   * exception: out of ammo it does not stop, it labours - 3 ticks with, 7
+   * without (`laser_ufun`, lisp/people.lsp), which is what "collect ammo to
+   * increase firing speed" in the tutorial is telling you.
+   *
+   * The round is already spent when this returns, so a caller that then
+   * refuses the shot - `player_fire_weapon` will not fire out of a wall - has
+   * to hand `spent` back.
    */
-  updatePower(wants: boolean): void {
-    this.powerActive = false
-    if (!wants || !this.power || this.powerCharge <= 0 || this.isDead) return
-
-    this.powerActive = true
-    if (--this.powerCharge <= 0) {
-      this.powerCharge = 0
-      this.power = null
-    }
-  }
-
-  /**
-   * Consumes a shot if the gun is ready. Returns the muzzle and one angle per
-   * tracer the weapon throws, or null while cooling down.
-   */
-  tryFire(wantsToFire: boolean): { x: number; y: number; angles: number[] } | null {
+  tryFire(wantsToFire: boolean): { slot: number; spent: number } | null {
     if (this.fireCooldown > 0) this.fireCooldown--
     if (!wantsToFire || this.fireCooldown > 0) return null
 
-    const weapon = this.weaponDef
+    const weapon = this.weaponSlot
     const dry = this.magazines[this.weapon] <= 0
-    // Out of ammo the gun does not stop, it labours - which is what "collect
-    // ammo to increase firing speed" is telling you. FAST halves the wait.
-    const delay = dry ? FIRE_DELAY_DRY : weapon.delay
-    this.fireCooldown = Math.max(1, Math.round(this.powerFast ? delay / 2 : delay))
+    this.fireCooldown = Math.max(1, dry ? (weapon.dryFireDelay ?? weapon.fireDelay) : weapon.fireDelay)
 
     if (dry) {
-      // Only the machine gun will fire on an empty magazine; the rest are
-      // simply not there to be fired.
-      if (this.weapon !== 0) return null
-    } else {
-      this.magazines[this.weapon] = Math.max(0, this.magazines[this.weapon] - weapon.cost)
+      if (weapon.dryFireDelay === null) return null
+      return { slot: this.weapon, spent: 0 }
     }
 
-    const angles: number[] = []
-    const shots = dry ? 1 : weapon.shots
-    for (let i = 0; i < shots; i++) {
-      // Spread fans symmetrically about the aim; a single shot sits dead on it.
-      const t = shots === 1 ? 0 : (i / (shots - 1)) * 2 - 1
-      angles.push(this.aimAngle + t * weapon.spread)
-    }
-
-    const { x, y } = this.muzzle
-    return { x, y, angles }
+    const spent = Math.min(weapon.ammoCost, this.magazines[this.weapon])
+    this.magazines[this.weapon] -= spent
+    return { slot: this.weapon, spent }
   }
 
-  /** True while the FAST power is running. */
-  get powerFast(): boolean {
-    return this.powerActive && this.power === 'fast'
+  /** Puts a refused shot's round back in the magazine. */
+  refund(shot: { slot: number; spent: number }): void {
+    this.magazines[shot.slot] += shot.spent
   }
 
   /**
-   * True while SNEAKY is running. It does not turn off a fight already in
-   * progress - it stops anything from noticing you in the first place.
+   * Applies what a held power wants drawn: the cop's own transparency and
+   * FAST's two trailing copies, which are ordinary blits of the live textures
+   * at remembered positions (`draw_fast`, lisp/people.lsp).
    */
-  get powerSneaky(): boolean {
-    return this.powerActive && this.power === 'sneaky'
+  drawPowers(visuals: PowerVisuals): void {
+    const body = visuals.body
+    // No refraction shader here, so 'predator' is drawn as very nearly gone.
+    const alpha = body.mode === 'transparent' ? body.alpha : body.mode === 'predator' ? 0.06 : 1
+    this.sprite.alpha *= alpha
+    this.topSprite.alpha *= alpha
+
+    const legFrame = this.currentFrame
+    const torsoFrame = this.topFrame()
+    visuals.ghosts.forEach((ghost, i) => {
+      const pair = this.ghostAt(i)
+      pair.legs.visible = legFrame !== undefined
+      if (legFrame) {
+        pair.legs.alpha = ghost.alpha
+        this.blit(pair.legs, legFrame, ghost.x, ghost.y)
+      }
+
+      pair.torso.visible = ghost.torso !== null && torsoFrame !== undefined
+      if (ghost.torso && torsoFrame) {
+        pair.torso.alpha = ghost.alpha
+        this.blit(pair.torso, torsoFrame, ghost.torso.x, ghost.torso.y + torsoFrame.height - 1)
+      }
+    })
+
+    for (let i = visuals.ghosts.length; i < this.ghosts.length; i++) {
+      this.ghosts[i].legs.visible = false
+      this.ghosts[i].torso.visible = false
+    }
+  }
+
+  private ghostAt(index: number): { legs: Sprite; torso: Sprite } {
+    let pair = this.ghosts[index]
+    if (!pair) {
+      pair = { legs: new Sprite(), torso: new Sprite() }
+      this.ghosts[index] = pair
+      this.ghostLayer.addChild(pair.legs, pair.torso)
+    }
+    return pair
+  }
+
+  /** The engine's anchoring, mirrored the same way `Entity.draw` mirrors it. */
+  private blit(sprite: Sprite, frame: Frame, x: number, y: number): void {
+    sprite.texture = frame.texture
+    if (this.direction >= 0) {
+      sprite.scale.x = 1
+      sprite.x = Math.round(x - frame.xcfg)
+    } else {
+      sprite.scale.x = -1
+      sprite.x = Math.round(x - (frame.width - frame.xcfg - 1) + frame.width)
+    }
+    sprite.y = Math.round(y - frame.height + 1)
   }
 }

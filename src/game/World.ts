@@ -1,42 +1,42 @@
 import { Container, Graphics, type Renderer } from 'pixi.js'
 
 import type { GameAssets } from '../assets/loader'
+import type { LevelObjectData } from '../assets/types'
 import type { AudioBank } from '../audio/AudioBank'
 import { AmbientSounds } from '../audio/AmbientSounds'
 import { Camera } from '../core/camera'
-import type { Input } from '../core/input'
+import type { Input, InputState } from '../core/input'
 import { TICK_HZ } from '../core/loop'
 import { LightLayer } from '../render/LightLayer'
-import { TileLayer } from '../render/TileLayer'
-import { Level } from './Level'
-import { Player } from './Player'
-import { Bullets } from './Bullets'
-import { Signals } from './Signals'
-import { buildPlatforms, type Platform } from './Platform'
-import { spawnProps, type Prop } from './Prop'
-import { buildTeleporters, type Teleporter } from './Teleporter'
-import { buildTurrets, type Turret } from './Turret'
-import { buildCeilingAnts, type CeilingAnt } from './CeilingAnt'
-import { buildFloaters, type Floater } from './Floater'
-import { buildDoors, Door } from './Door'
-import { buildForceFields, type ForceField } from './ForceField'
-import { ammoPickup, POWERS } from './Weapons'
-import { CONSOLE_LIT_TICKS, readSave, restore, snapshot, writeSave } from './SaveGame'
-import { Effects } from './Effects'
 import { StatusBar } from '../render/StatusBar'
+import { TileLayer } from '../render/TileLayer'
+import { PlayerCombatant, PropCombatant, type Combatant } from './combat'
+import { isBlocked, isGrounded, moveAndCollide } from './collision'
+import { EffectsSystem, gibFlavourFor, hurtRadius, type BlastSource } from './effects/index'
+import { buildEnemies, type EnemyGroup, type EnemyShot, type EnemySound } from './enemies/index'
+import { buildForceFields, type ForceField } from './ForceField'
+import { Level } from './Level'
+import { LevelLogic, type LogicFocus, type LogicHost } from './logic/index'
+import { Player } from './Player'
+import {
+  axis,
+  givePlayerHealth,
+  HEART_HEAL,
+  powerPickup,
+  Powers,
+  type PowerKind,
+} from './powers'
+import { Prop, spawnProps } from './Prop'
+import { CONSOLE_LIT_TICKS, readSave, restore, snapshot, writeSave } from './SaveGame'
+import { buildTeleporters, type Teleporter } from './Teleporter'
 import { TrainMessages } from './TrainMessages'
-import { isBlocked, isGrounded } from './collision'
-
-/** What a turret's shot takes off the player. */
-const ENEMY_BULLET_DAMAGE = 6
-/** Enemy tracers are red, so incoming fire reads at a glance. */
-const ENEMY_TRACER = 0xff6a4a
-
-/** What a HEALTH pickup restores. */
-const HEALTH_PICKUP = 15
-const MAX_HEALTH = 100
-/** How close the player has to be to collect something. */
-const PICKUP_REACH = 18
+import {
+  AMMO_ICON_SLOT,
+  ProjectileSystem,
+  type ProjectileHost,
+  type ProjectileOwner,
+  type ProjectileTarget,
+} from './weapons/index'
 
 /**
  * Objects the player collides with as if they were terrain.
@@ -45,36 +45,18 @@ const PICKUP_REACH = 18
  * both turrets, the T_REX, and NEXT_LEVEL. In the original it means "this can
  * block", with the actual blocking driven from lisp state, so taking it as
  * "is solid" walls off exit portals and anything else you are meant to stand
- * on. This is the list of things that are just geometry.
+ * on. This is the list of things that are just geometry; the ones whose
+ * solidity varies - doors, steps, lifts - come from the logic's own views.
  */
-const BLOCKER_TYPES = /^(HIDDEN_(WALL|RAMP)|BOLDER$|BLOCK$|STEP$)/
-
-/**
- * What a dying hidden wall throws out, straight from `hwall_ai` and
- * `big_wall_ai` in the original's lisp/doors.lsp:
- *
- *   (hurt_radius (+ (x) (* 15 (direction))) (- (y) 7)  50  60 (bg) 20)
- *   (hurt_radius (x)                        (- (y) 15) 110 120 (bg) 20)
- *
- * The arguments are x, y, radius, damage - so both are far past the 25hp a
- * block has, which is exactly why one shot takes a whole wall.
- */
-const WALL_BLASTS = {
-  big: { radius: 110, amount: 120, offsetX: 0, offsetY: -15 },
-  small: { radius: 50, amount: 60, offsetX: 15, offsetY: -7 },
-}
+const BLOCKER_TYPES = /^(HIDDEN_(WALL|RAMP)|BOLDER$|BLOCK$)/
 
 /** The five characters `make_hidden_wall_char` gives `big_wall_ai` to. */
 const BIG_WALLS = /^HIDDEN_WALL_(2x2|3WAL|3FLR|3TOP|AFLR)$/
+/** ...and the seven it gives `hwall_ai` (lisp/doors.lsp:184-198). */
+const SMALL_WALLS = /^HIDDEN_(WALL[1-5]|RAMP[12])$/
 
-function wallBlast(character: string): { radius: number; amount: number; offsetX: number; offsetY: number } | null {
-  if (BIG_WALLS.test(character)) return WALL_BLASTS.big
-  if (/^HIDDEN_(WALL[1-5]|RAMP[12])$/.test(character)) return WALL_BLASTS.small
-  return null
-}
-
-/** A chain cannot run longer than this, however the level is built. */
-const BLAST_LIMIT = 512
+/** The flyer family, which all die the same way (lisp/flyer.lsp flyer_ai). */
+const FLYERS = new Set(['FLYER', 'GREEN_FLYER', 'WHO'])
 
 /**
  * A blocker whose top is within this of the player's feet is stepped onto
@@ -83,6 +65,9 @@ const BLAST_LIMIT = 512
  * feels like catching on nothing.
  */
 const BLOCKER_STEP_HEIGHT = 8
+
+/** How close the player has to be to collect something. */
+const PICKUP_REACH = 18
 
 /** How close the player must stand to a save console to use it. */
 const CONSOLE_REACH_X = 26
@@ -94,6 +79,20 @@ const EXIT_REACH_Y = 40
 /** ...and how close before it says so. Wider, or you never find out it is there. */
 const EXIT_PROMPT_X = 46
 const EXIT_PROMPT_Y = 52
+
+/** Where `player_fire_weapon` measures line of sight from - the torso's chest. */
+const CHEST_HEIGHT = 16
+
+/**
+ * How faded the cop has to be before nothing notices him.
+ *
+ * SNEAKY reports concealment as a 0..1 ramp, but the creatures' waking tests
+ * take a boolean, so somewhere on that ramp is a threshold. Invented: half.
+ */
+const SNEAKY_THRESHOLD = 0.5
+
+/** The lisp's 0..127 volume scale, which AudioBank works in 0..1. */
+const FULL_VOLUME = 127
 
 /**
  * Owns a loaded level and everything drawn in it.
@@ -109,31 +108,47 @@ export class World {
   private readonly scene = new Container()
   private readonly propLayer = new Container()
   private readonly entityLayer = new Container()
-  private readonly effects: Effects
+
+  /** Explosions, smoke and body parts. */
+  private readonly fx: EffectsSystem
+  /** Everything in flight, the player's and the monsters' alike. */
+  private readonly projectiles: ProjectileSystem
+  /** Sensors, gates, doors, steps and lifts. */
+  private readonly logic: LevelLogic
+  /** Everything that thinks. */
+  private readonly enemies: EnemyGroup
+  /** The cop's special-power slot, and the seam it acts on him through. */
+  private readonly powers: Powers
+  private readonly powerHost: CopPowerHost
 
   /** Level objects, drawn behind the player. */
   private readonly props: Prop[]
-  private readonly platforms: Platform[]
+  private readonly propsByIndex = new Map<number, Prop>()
   private readonly teleporters: Teleporter[]
-  private readonly turrets: Turret[]
-  private readonly ants: CeilingAnt[]
-  private readonly floaters: Floater[]
-  private readonly doors: Door[]
   private readonly forceFields: ForceField[]
   private readonly fieldGraphics = new Graphics()
+
   /**
-   * Props that are solid without being doors - the hidden walls, mostly, which
-   * carry `can_block` and stand in the middle of a corridor looking like part
-   * of it. Collision is tile-based, so until now you walked straight through
-   * every one of them.
+   * Props that are solid without the logic having an opinion - the hidden
+   * walls, mostly, which stand in the middle of a corridor looking like part
+   * of it. Collision is tile-based, so without this you walk through them.
    */
   private readonly blockers: Prop[] = []
-  /** Hidden walls waiting to go off, so a chain resolves without recursing. */
-  private readonly blastQueue: Prop[] = []
-  /** Enemy fire, which hits the player rather than props. */
-  private readonly enemyBullets = new Bullets()
-  /** The platform the player is standing on, so it can carry them. */
-  private riding: Platform | null = null
+
+  /**
+   * Everything a shot or a blast can catch, the cop included. One list is what
+   * lets an ant hit another ant and what drives the hidden-wall chain: a wall
+   * that dies calls `hurt_radius` on itself, and its neighbours are in here.
+   *
+   * Entries are only ever removed by `retireDead`, which runs at the end of a
+   * tick, so a blast can iterate this while the things it kills are dying.
+   */
+  private readonly combatants: Combatant[] = []
+  private readonly combatantOf = new Map<Prop, PropCombatant>()
+  private readonly playerTarget: PlayerCombatant
+
+  /** The lift the player is standing on, so `platform_push` knows who to carry. */
+  private riding: number | null = null
   private visibleProps = 0
 
   private readonly bgTiles: TileLayer
@@ -148,6 +163,9 @@ export class World {
 
   readonly camera: Camera
   readonly player: Player
+
+  /** The cop, as the level logic sees him. */
+  private readonly focus: PlayerFocus
 
   /** Level ambience, driven from the camera position. */
   private readonly ambience: AmbientSounds
@@ -180,13 +198,9 @@ export class World {
   /** The original status bar, in screen space. */
   readonly statusBar: StatusBar
 
-  /** Machine gun fire, drawn over the props but under the above-tiles. */
-  private readonly bullets = new Bullets()
+  /** Where the crosshair is in world space; the disc and the death ray steer by it. */
+  private pointer: { x: number; y: number } | null = null
 
-  /** Sensors, gates and the objects they drive. */
-  private readonly signals: Signals
-  /** Props that can be shot, kept separate so bullets do not scan everything. */
-  private readonly targets: Prop[] = []
   private kills = 0
 
   private readonly assets: GameAssets
@@ -200,64 +214,85 @@ export class World {
     trainMessages: Record<number, string> = {},
   ) {
     this.assets = assets
-    this.effects = new Effects(assets)
     this.bgTiles = new TileLayer(assets, level, 'back')
     this.fgTiles = new TileLayer(assets, level, 'fore', false)
     this.aboveTiles = new TileLayer(assets, level, 'fore', true)
+
+    this.player = new Player(assets, level)
+    this.playerTarget = new PlayerCombatant(this.player, (amount) => this.hurtPlayer(amount))
+    this.combatants.push(this.playerTarget)
+
+    this.fx = new EffectsSystem({
+      assets,
+      // Box is structurally identical to collision.ts's Body.
+      terrain: { isBlocked: (box) => isBlocked(this.level, box) },
+      audio: this.audio,
+      targets: () => this.combatants,
+    })
+
+    this.projectiles = new ProjectileSystem(assets, this.projectileHost(), this.fx.particles)
 
     this.backdrop.addChild(this.bgTiles.container)
     this.scene.addChild(
       this.fgTiles.container,
       this.propLayer,
       this.entityLayer,
-      this.bullets.graphics,
-      this.enemyBullets.graphics,
+      this.projectiles.container,
       this.fieldGraphics,
-      this.effects.container,
+      this.fx.container,
       this.aboveTiles.container,
     )
     this.root.addChild(this.backdrop, this.scene)
+    this.entityLayer.addChild(this.player.ghostLayer, this.player.sprite, this.player.topSprite)
 
     this.props = spawnProps(assets, level.objects)
-    // Platforms take over from the inert props the level spawned for them.
-    this.platforms = buildPlatforms(assets, level.objects, level.links, this.props)
+    // Each of these takes the inert props the level spawned for its own types
+    // out of the list and drives them itself.
     this.teleporters = buildTeleporters(assets, level.objects, level.links, this.props)
-    this.turrets = buildTurrets(assets, level.objects, this.props)
-    this.ants = buildCeilingAnts(assets, level.objects, this.props, level)
-    this.floaters = buildFloaters(assets, level.objects, this.props, level)
-    this.doors = buildDoors(assets, level.objects, level.links, this.props)
     this.forceFields = buildForceFields(level.objects, this.props, level)
 
-    for (const prop of [
-      ...this.props,
-      ...this.platforms,
-      ...this.teleporters,
-      ...this.turrets,
-      ...this.ants,
-      ...this.floaters,
-      ...this.doors,
-    ]) {
+    this.focus = new PlayerFocus(this.player, level)
+    this.logic = new LevelLogic(level.objects, level.links, this.logicHost())
+
+    this.enemies = buildEnemies(assets, level.objects, this.props, {
+      level,
+      isSignalOn: (index) => this.logic.isOn(index),
+      hurtPlayer: (amount) => this.hurtPlayer(amount),
+      pushPlayer: (dx) => {
+        moveAndCollide(this.level, this.player, dx, 0)
+      },
+      playSound: (sound, x, y) => this.playEnemySound(sound, x, y),
+      // Cosmetic only: the creatures use this for the sparks they throw off
+      // when hit and for the boss's cascade, never for damage, so it carries
+      // no blast. Deaths go through `deathEffect` instead.
+      explode: (x, y, kind) =>
+        this.fx.particles.spawn(kind === 'sparks' ? 'EXPLODE6' : 'EXPLODE1', x, y),
+      dropPickup: (character, x, y) => this.dropPickup(character, x, y),
+      onSpawn: (enemy) => this.addActor(enemy),
+      onRemove: (enemy) => this.removeActor(enemy),
+      onFire: (shot) => this.fireEnemyShot(shot),
+    })
+
+    for (const prop of [...this.props, ...this.teleporters, ...this.enemies.members]) {
       this.propLayer.addChild(prop.sprite)
+      if (prop.objectIndex >= 0) this.propsByIndex.set(prop.objectIndex, prop)
+      if (prop.hurtable) this.addCombatant(prop)
       if (prop.character === 'NEXT_LEVEL') this.exits.push(prop)
       if (prop.character === 'RESTART_POSITION') this.consoles.push(prop)
-    }
-
-    this.signals = new Signals(level.objects, level.links)
-    for (const prop of [...this.props, ...this.turrets, ...this.ants, ...this.floaters]) {
-      if (prop.hurtable) this.targets.push(prop)
-    }
-    for (const prop of this.props) {
       if (BLOCKER_TYPES.test(prop.character)) this.blockers.push(prop)
     }
+
+    this.powerHost = new CopPowerHost(this.player, this.fx)
+    this.powers = new Powers(this.powerHost, {
+      hasLegState: (state) => assets.hasState('DARNEL', state),
+    })
+    this.player.legStates = this.powers
 
     this.ambience = new AmbientSounds(audio, level.objects)
     this.messages = new TrainMessages(assets, level.objects, trainMessages)
     this.statusBar = new StatusBar(assets)
 
     this.camera = new Camera(viewWidth, viewHeight)
-
-    this.player = new Player(assets, level)
-    this.entityLayer.addChild(this.player.sprite, this.player.topSprite)
 
     const spawn = this.findSpawn()
     this.restartAt = spawn
@@ -266,6 +301,7 @@ export class World {
     const saved = readSave()
     if (saved && saved.level === level.name) {
       restore(this.player, saved)
+      if (saved.power) this.powers.give(saved.power)
       this.kills = saved.kills
       this.restartAt = { x: saved.x, y: saved.y }
       spawn.x = saved.x
@@ -291,40 +327,52 @@ export class World {
   update(input: Input): void {
     this.now++
     if (input.pointer.seen) {
-      this.player.aimAt(
-        this.camera.x + input.pointer.x / this.zoom,
-        this.camera.y + input.pointer.y / this.zoom,
-      )
+      this.pointer = {
+        x: this.camera.x + input.pointer.x / this.zoom,
+        y: this.camera.y + input.pointer.y / this.zoom,
+      }
+      this.player.aimAt(this.pointer.x, this.pointer.y)
     }
 
-    // Platforms move, then the player's own physics runs, then the carry and
-    // the landing snap are applied. The carry has to come *after* the player's
-    // update: that is what captures the position render interpolation starts
-    // from, so carrying beforehand would make the player jump a tick ahead of
-    // the platform it is standing on.
-    for (const platform of this.platforms) platform.update()
     const activating = input.state.action || input.state.down
+    this.focus.pressingAction = activating
+
+    // The power runs before the movement step, because FAST *is* a movement
+    // step: `cop_mover` does `(do_special_power ...)` and only then
+    // `(player_move xm ym but)` (lisp/people.lsp). Running it after would
+    // double the previous tick's motion instead of this one's.
+    this.powerHost.buttons = input.state
+    if (!this.player.isDead) {
+      this.powers.update({
+        xm: axis(input.state.left, input.state.right),
+        ym: axis(input.state.up, input.state.down),
+        special: input.state.special,
+      })
+    }
     this.player.update(input.state, input.consumeJump())
-    this.ridePlatforms(activating)
-    this.useTeleporters(activating)
-    this.useConsoles(activating)
+
     const slot = input.consumeWeapon()
     if (slot !== null) this.player.selectWeapon(slot)
     const step = input.consumeWeaponStep()
     if (step) this.player.cycleWeapon(step > 0 ? 1 : -1)
 
-    this.player.updatePower(input.state.special)
     this.fireWeapon(input.state.fire)
+    this.projectiles.update()
 
-    this.signals.update(this.player.x, this.player.y)
-    this.applySignals()
-    this.updateDoors()
+    // One tick of the level's own wiring, then the result is pushed onto the
+    // props it drives. `carryRiders` fires inside this call, which is why the
+    // lift the player stands on has to have been worked out last tick.
+    this.logic.tick()
+    this.applyLogicViews()
+    this.rideLifts()
     this.updateForceFields()
+    this.useTeleporters(activating)
+    this.useConsoles(activating)
     this.pushOutOfBlockers()
     this.collectPickups()
     this.updateEnemies()
     this.retireDead()
-    this.effects.update()
+    this.fx.update()
 
     this.camera.follow(this.player.x, this.player.y - this.player.height / 2, {
       width: this.level.widthPx,
@@ -340,99 +388,162 @@ export class World {
     this.checkExits(activating)
   }
 
-  /**
-   * Lands the player on any platform they are falling onto, and sends that
-   * platform on its way if they press the action key while standing there.
-   */
-  private ridePlatforms(activating: boolean): void {
-    const wasRiding = this.riding
-    this.riding = null
+  /* ---------------------------------------------------------------- *
+   * the seams the subsystems are wired through
+   * ---------------------------------------------------------------- */
 
-    // Carry along with whatever was being ridden last tick. The downward
-    // component matters: a descending platform would otherwise drop out from
-    // under the player, who free-falls and re-lands on it every few ticks -
-    // which reads as the platform bouncing. Upward velocity means they jumped,
-    // so let them go.
-    if (wasRiding && this.player.vy >= 0) {
-      this.player.x += wasRiding.deltaX
-      if (wasRiding.deltaY > 0) this.player.y += wasRiding.deltaY
+  private projectileHost(): ProjectileHost {
+    return {
+      level: this.level,
+      targets: () => this.combatants,
+      // Everything in `combatants` is a Combatant, so this is the same object
+      // coming back. A direct hit carries no `from`: the host's damage call
+      // has no room for one, so a weapon kill always produces the plain gibs
+      // rather than the flaming or electric set `get_dead_part` would pick.
+      damage: (target, amount, pushX, pushY) => {
+        const combatant = target as Combatant
+        combatant.hurt(amount, null, pushX, pushY)
+      },
+      hurtRadius: (x, y, radius, amount, exclude, maxPush) => {
+        hurtRadius(this.blastTargets(exclude), x, y, radius, amount, null, maxPush)
+      },
+      playSound: (name, x, y) => this.audio.playNamed(name, { volume: 0.6, x, y }),
+      pointer: () => this.pointer,
+      addLight: (x, y, outer) => this.fx.flash(x, y, outer),
     }
+  }
 
-    for (const platform of this.platforms) {
-      const { left, right, y } = platform.surface
-      if (this.player.x < left || this.player.x > right) continue
-
-      // Land only when coming down onto it, so you can still jump up through
-      // one. The reach below the surface is the platform's own `start_accel`,
-      // which is what the original uses to pull a boarding player up.
-      const distance = y - this.player.y
-      if (this.player.vy < 0 || distance > 1 || distance < -platform.boardingReach) continue
-
-      this.player.landOn(y)
-      this.riding = platform
-
-      if (activating) platform.trigger()
-      return
+  private logicHost(): LogicHost {
+    const assets = this.assets
+    return {
+      focuses: () => [this.focus],
+      hasState: (type, state) => assets.hasState(type, state),
+      frameCount: (type, state) => assets.animation(type, state).length,
+      pictureSize: (type, state, frame) => {
+        const picture = assets.animation(type, state)[frame]
+        return { width: picture?.width ?? 0, height: picture?.height ?? 0 }
+      },
+      ability: (type, name) => assets.ability(type, name),
+      touching: (index, focus) => this.touchingFocus(index, focus),
+      isDefeated: (index) => {
+        const prop = this.propsByIndex.get(index)
+        return prop !== undefined && (prop.isDying || prop.isDead)
+      },
+      playSound: (sound, volume, x, y) =>
+        this.audio.playNamed(sound, { volume: volume / FULL_VOLUME, x, y }),
+      carryRiders: (index, dx, dy) => this.carryRiders(index, dx, dy),
     }
   }
 
   /**
-   * Runs the enemies: turrets track and shoot, ceiling ants drop and give
-   * chase, and anything that lands on the player hurts them.
+   * `touching_bg` - the object's own picture box overlapping the focus's.
+   *
+   * The bounds are inclusive, which matters for exactly one caller: a player
+   * standing on a lift has his feet at the deck's top edge, and a strict test
+   * would say he was not touching the thing he is standing on.
    */
-  private updateEnemies(): void {
-    const player = this.player
+  private touchingFocus(index: number, focus: LogicFocus): boolean {
+    const prop = this.propsByIndex.get(index)
+    if (!prop) return false
 
-    const unseen = player.powerSneaky
+    const box = prop.hitBox
+    const { halfWidth, height } = this.player
+    if (focus.x + halfWidth < box.left || focus.x - halfWidth > box.right) return false
+    return focus.y >= box.top && focus.y - height <= box.bottom
+  }
 
-    for (const turret of this.turrets) {
-      turret.update(player.x, player.y, unseen)
-      const shot = turret.takeShot()
-      if (!shot) continue
-      this.enemyBullets.spawn(shot.x, shot.y, shot.angle, ENEMY_TRACER)
-      this.audio.playNamed('MGUN_SND', { volume: 0.35, x: shot.x, y: shot.y })
+  /** Everything a blast can reach, minus whoever set it off. */
+  private *blastTargets(exclude: ProjectileOwner | null): Iterable<Combatant> {
+    for (const combatant of this.combatants) {
+      if (combatant !== exclude) yield combatant
     }
+  }
 
-    for (const ant of this.ants) {
-      if (ant.isDying || ant.isDead) continue
-      ant.update(player.x, player.y, unseen)
+  /** `ASML_DEATH` and friends resolve through AudioBank's array table. */
+  private playEnemySound(sound: EnemySound, x: number, y: number): void {
+    this.audio.playNamed(sound, { volume: 0.6, x, y })
+  }
 
-      const shot = ant.takeShot()
-      if (shot) {
-        this.enemyBullets.spawn(shot.x, shot.y, shot.angle, ENEMY_TRACER)
-        this.audio.playNamed('MGUN_SND', { volume: 0.3, x: shot.x, y: shot.y })
-      }
+  /**
+   * An enemy pulling its trigger. `fire_object`'s type argument is the
+   * shooter's own aitype, so the round it gets is the round its colour and its
+   * health already said it would fire.
+   */
+  private fireEnemyShot(shot: EnemyShot): void {
+    const shooter = shot.shooter ? (this.combatantOf.get(shot.shooter) ?? null) : null
+    this.projectiles.fireObject(shot.aitype, shot.x, shot.y, shot.angle, shooter, this.playerTarget)
+  }
 
-      const touch = ant.touchDamage(player.x, player.y, player.halfWidth, player.height)
-      if (touch) this.hurtPlayer(touch)
+  /** What a dead monster leaves behind - `ai_ammo` in lisp/guns.lsp. */
+  private dropPickup(character: string, x: number, y: number): void {
+    if (!this.assets.character(character)) return
+    const data: LevelObjectData = {
+      type: character,
+      state: this.assets.defaultState(character),
+      x,
+      y,
+      direction: 1,
+      hp: 0,
+      aistate: 0,
+      aitype: 0,
+      xvel: 0,
+      yvel: 0,
+      xacel: 0,
+      yacel: 0,
     }
+    const prop = new Prop(this.assets, data)
+    this.props.push(prop)
+    this.addActor(prop)
+  }
 
-    for (const floater of this.floaters) {
-      if (floater.isDying || floater.isDead) continue
-      floater.update(player.x, player.y, unseen)
-      const touch = floater.touchDamage(player.x, player.y, player.halfWidth, player.height)
-      if (touch) this.hurtPlayer(touch)
-    }
+  /* ---------------------------------------------------------------- *
+   * damage
+   * ---------------------------------------------------------------- */
 
-    const box = {
-      left: player.x - player.halfWidth,
-      top: player.y - player.height,
-      right: player.x + player.halfWidth,
-      bottom: player.y + 1,
-    }
-    for (const impact of this.enemyBullets.update(this.level, [], box)) {
-      if (impact.hitPlayer) this.hurtPlayer(ENEMY_BULLET_DAMAGE)
-      const which = Math.random() < 0.5 ? 'MG_HIT_SND1' : 'MG_HIT_SND2'
-      this.audio.playNamed(which, { volume: 0.5, x: impact.x, y: impact.y })
-    }
+  private addCombatant(prop: Prop): void {
+    if (this.combatantOf.has(prop)) return
+    const combatant = new PropCombatant(prop, (target, amount, from) =>
+      this.hurtProp(target, amount, from),
+    )
+    this.combatantOf.set(prop, combatant)
+    this.combatants.push(combatant)
+  }
 
-    // Respawn once the death animation has run its course.
-    if (player.isDead) return
-    if (player.health <= 0) {
-      // Back to the last console used, or the level's start if there was none.
-      player.revive(this.restartAt.x, this.restartAt.y)
-      this.riding = null
-    }
+  private removeCombatant(prop: Prop): void {
+    const combatant = this.combatantOf.get(prop)
+    if (!combatant) return
+    this.combatantOf.delete(prop)
+    const index = this.combatants.indexOf(combatant)
+    if (index >= 0) this.combatants.splice(index, 1)
+  }
+
+  private addActor(prop: Prop): void {
+    this.propLayer.addChild(prop.sprite)
+    if (prop.hurtable) this.addCombatant(prop)
+  }
+
+  private removeActor(prop: Prop): void {
+    prop.sprite.destroy()
+    this.removeCombatant(prop)
+  }
+
+  /**
+   * A hit on a level object.
+   *
+   * The chain reaction that opens a room from one shot lives here and nowhere
+   * else: a dying hidden wall's own blast is `hurt_radius` over its
+   * neighbours, they are in `combatants` like everything else, and 60 damage
+   * against 25hp blocks kills several of them - so this re-enters itself once
+   * per block. A wall already dying is refused, which is what ends it.
+   */
+  private hurtProp(prop: Prop, amount: number, from: BlastSource | null): void {
+    if (prop.isDying || prop.isDead) return
+    // SWITCH_BALL latches on the first hit; nothing else in the logic cares.
+    if (prop.objectIndex >= 0) this.logic.reportDamage(prop.objectIndex)
+
+    if (!prop.damage(amount, from?.type)) return
+    this.kills++
+    this.deathEffect(prop, from)
   }
 
   private hurtPlayer(amount: number): void {
@@ -442,124 +553,170 @@ export class World {
   }
 
   /**
-   * Picks up ammo and health the player walks over. The amount an ammo icon
-   * gives is in its own name.
-   */
-  private collectPickups(): void {
-    for (let i = this.props.length - 1; i >= 0; i--) {
-      const prop = this.props[i]
-      if (Math.abs(prop.x - this.player.x) > PICKUP_REACH) continue
-      if (Math.abs(prop.y - this.player.y) > PICKUP_REACH) continue
-
-      let taken = false
-      const ammo = ammoPickup(prop.character)
-      const power = POWERS[prop.character]
-      if (ammo) {
-        // Ammo goes to its own weapon's magazine, and picking up something you
-        // did not have is also how you get the weapon.
-        const had = this.player.magazines[ammo.slot]
-        this.player.magazines[ammo.slot] += ammo.amount
-        if (had <= 0) this.player.selectWeapon(ammo.slot)
-        this.audio.playNamed('AMMO_SND', { volume: 0.6, x: prop.x, y: prop.y })
-        taken = true
-      } else if (power) {
-        this.player.givePower(power)
-        this.audio.playNamed('HEALTH_UP_SND', { volume: 0.6, x: prop.x, y: prop.y })
-        taken = true
-      } else if (prop.character === 'HEALTH' && this.player.health < MAX_HEALTH) {
-        this.player.health = Math.min(MAX_HEALTH, this.player.health + HEALTH_PICKUP)
-        this.audio.playNamed('HEALTH_UP_SND', { volume: 0.6, x: prop.x, y: prop.y })
-        taken = true
-      }
-
-      if (!taken) continue
-      prop.sprite.destroy()
-      this.props.splice(i, 1)
-      const t = this.targets.indexOf(prop)
-      if (t >= 0) this.targets.splice(t, 1)
-    }
-  }
-
-  /**
-   * Lets the logic network drive the world: doors and force fields play their
-   * `running` state while switched on, and a platform wired to a switch runs
-   * on its own whenever that switch is live.
-   */
-  private applySignals(): void {
-    for (const prop of this.props) {
-      if (prop.objectIndex < 0 || prop.isDying || prop.isDead) continue
-      if (!this.assets.hasState(prop.character, 'running')) continue
-      if ((this.level.links[prop.objectIndex] ?? []).length === 0) continue
-
-      const on = this.signals.isDriven(prop.objectIndex)
-      const wanted = on ? 'running' : 'stopped'
-      if (prop.state !== wanted) prop.setState(wanted, true)
-    }
-
-    for (const platform of this.platforms) {
-      if (platform.isMoving) continue
-      // The third link is the platform's switch; with one wired, the switch
-      // runs it rather than the player.
-      const switches = (this.level.links[platform.objectIndex] ?? []).slice(2)
-      if (switches.length === 0) continue
-      if (switches.some((i) => this.signals.isActive(i))) platform.trigger()
-    }
-  }
-
-  /**
-   * Fires whatever is in hand and advances the shots already in the air.
+   * What a character comes apart into.
    *
-   * Impact sounds alternate at random between the two the original uses
-   * (lisp/weapons.lsp, mbullet_ai).
+   * Every one of these is an authored cluster in the scripts rather than a
+   * generic explosion, which is why this is a dispatch on the character and
+   * not a single call. The original never puts a fireball over an ant: ants
+   * throw body parts and nothing else (`create_dead_parts`, lisp/ant.lsp).
    */
+  private deathEffect(prop: Prop, from: BlastSource | null): void {
+    const { explosions, gibs } = this.fx
+    const { x, y, character } = prop
+    const box = prop.hitBox
+    const middle = (box.top + box.bottom) / 2
+
+    if (BIG_WALLS.test(character)) return explosions.bigWallBlast(x, y, from)
+    if (SMALL_WALLS.test(character)) return explosions.hiddenWallBlast(x, y, prop.direction, from)
+    if (FLYERS.has(character)) return explosions.flyerDeath(x, middle)
+
+    switch (character) {
+      case 'SPRAY_GUN':
+      case 'TRACK_GUN':
+      case 'WALK_ROB':
+        // The hit point is not recorded by the time the kill resolves, so the
+        // four fireballs go around the middle rather than around the wound.
+        return explosions.turretDeath(x, middle, x, y)
+
+      case 'ANT_ROOF':
+      case 'HIDDEN_ANT':
+        // No explosion at all: an ant comes apart into five body parts and
+        // that is the whole of it. The tint index is the ant's own aitype,
+        // which is what `ant_draw` colours the live one by.
+        return gibs.createDeadParts(x, y, prop.direction, 'ant', gibFlavourFor(from), prop.data.aitype)
+
+      case 'BOSS_ANT':
+        // The boss reports a kill on the hit that takes its last form, but it
+        // is not dead - `boss_ai` runs a minute of its own cascade first.
+        return
+
+      case 'JUGGER':
+        return explosions.robotBlownUp(x, y)
+
+      case 'ROB1':
+        explosions.robotBlownUp(x, y)
+        return explosions.rob1Death(x, y)
+
+      case 'BOLDER':
+        return explosions.boulderDeath(x, middle)
+
+      default:
+        // Scenery. Nothing in the scripts authors a death for a crate, so it
+        // gets the four-sprite debris burst `do_small_explo` is built from -
+        // no sound and no blast, which is the quiet end the original gives it.
+        return explosions.smallCluster(x, middle)
+    }
+  }
+
+  /* ---------------------------------------------------------------- *
+   * the cop's trigger
+   * ---------------------------------------------------------------- */
+
   private fireWeapon(wantsToFire: boolean): void {
-    const weapon = this.player.weaponDef
     const shot = this.player.tryFire(wantsToFire)
-    if (shot) {
-      for (const angle of shot.angles) this.bullets.spawn(shot.x, shot.y, angle, weapon.tracer)
-      this.audio.playNamed('MGUN_SND', { volume: 0.5, x: shot.x, y: shot.y })
-    }
+    if (!shot) return
 
-    for (const impact of this.bullets.update(this.level, this.targets)) {
-      if (impact.hit) this.hurtTarget(impact.hit, weapon.damage)
-      // Splash catches anything standing near where the shot landed, including
-      // things the tracer itself flew past.
-      if (weapon.splash > 0) {
-        this.effects.explode(impact.x, impact.y)
-        for (const target of this.targets) {
-          if (target === impact.hit || target.isDying || target.isDead) continue
-          const dx = target.x - impact.x
-          const dy = target.y - target.height / 2 - impact.y
-          if (dx * dx + dy * dy > weapon.splash * weapon.splash) continue
-          this.hurtTarget(target, Math.round(weapon.damage * 0.6))
-        }
-        this.audio.playNamed('P_EXPLODE_SND', { volume: 0.5, x: impact.x, y: impact.y })
-      } else {
-        const which = Math.random() < 0.5 ? 'MG_HIT_SND1' : 'MG_HIT_SND2'
-        this.audio.playNamed(which, { volume: 0.6, x: impact.x, y: impact.y })
-      }
-    }
+    const spawned = this.projectiles.firePlayer({
+      slot: shot.slot,
+      shooter: this.playerTarget,
+      muzzle: this.player.muzzle,
+      angle: this.player.aimAngle,
+      from: { x: this.player.x, y: this.player.y - CHEST_HEIGHT },
+      target: this.rocketLock(shot.slot),
+    })
 
+    // `player_fire_weapon` refuses when the muzzle is not visible from the
+    // chest, so a cop pressed into a wall cannot shoot through it - and it
+    // costs him nothing.
+    if (!spawned) this.player.refund(shot)
+  }
+
+  /** `player_rocket_ufun`'s ±160px search, minus the cop doing the searching. */
+  private rocketLock(slot: number): ProjectileTarget | null {
+    if (slot !== 2) return null
+    const lock = this.projectiles.findRocketTarget(this.player.x, this.player.y)
+    return lock === this.playerTarget ? null : lock
+  }
+
+  /* ---------------------------------------------------------------- *
+   * the level's own wiring
+   * ---------------------------------------------------------------- */
+
+  /** Pushes the logic's result onto the props that stand for its objects. */
+  private applyLogicViews(): void {
+    for (const view of this.logic.views) {
+      const prop = this.propsByIndex.get(view.index)
+      if (!prop) continue
+
+      // Set by hand rather than through `setPosition`, which would collapse
+      // the previous position and leave a moving lift nothing to interpolate.
+      prop.prevX = prop.x
+      prop.prevY = prop.y
+      prop.x = view.x
+      prop.y = view.y
+
+      if (prop.state !== view.state) prop.setState(view.state, true)
+      prop.setFrame(view.frame)
+    }
   }
 
   /**
-   * Runs the force fields. A wired one follows its signal; the rest are simply
-   * on, which is what a field with nothing controlling it should be.
+   * Works out which lift the player is standing on, for `platform_push` to
+   * carry next tick.
+   *
+   * The deck is the top of the lift's own sprite, but the band around it is
+   * `start_accel` either way. That is the number `make_smart_plat` gives each
+   * lift, and `platform_ai` boards a rider by snapping them to `(- (y)
+   * start_accel)` - 22 above the anchor for SMART_PLAT_SMALL, whose picture is
+   * only 15 tall, so a player who has just boarded stands 8px clear of the
+   * deck. A band that does not span that leaves the cop behind on the first
+   * tick of every trip.
+   *
+   * Which objects `platform_push` considers riders is a C++ primitive and not
+   * in the scripts, so the rest of the test is ours: over the deck and not on
+   * the way up, so you can still jump up through one.
+   */
+  private rideLifts(): void {
+    this.riding = null
+
+    for (const view of this.logic.views) {
+      if (!view.type.startsWith('SMART_PLAT')) continue
+      const prop = this.propsByIndex.get(view.index)
+      if (!prop) continue
+
+      const box = prop.hitBox
+      if (this.player.x < box.left || this.player.x > box.right) continue
+
+      const reach = this.assets.ability(view.type, 'start_accel') ?? 0
+      const distance = box.top - this.player.y
+      if (this.player.vy < 0 || distance > reach || distance < -reach) continue
+
+      this.player.landOn(box.top)
+      this.riding = view.index
+      return
+    }
+  }
+
+  /** `platform_push` - called mid-tick, with the delta the lift is about to move. */
+  private carryRiders(index: number, dx: number, dy: number): void {
+    if (this.riding !== index) return
+    // Upward velocity means they jumped off it; let them go.
+    if (this.player.vy < 0) return
+    this.player.x += dx
+    this.player.y += dy
+  }
+
+  /**
+   * Runs the force fields. `ff_ai` is gated on `(activated)`, which is true for
+   * a field nothing wires and follows the switch for one that is wired - all
+   * three in level01 have their own.
    */
   private updateForceFields(): void {
     for (const field of this.forceFields) {
-      const wired = (this.level.links[field.objectIndex] ?? []).length > 0
-      field.active = !wired || this.signals.isDriven(field.objectIndex)
+      field.active = this.logic.isActivated(field.objectIndex)
       if (field.update(this.now, this.player)) {
         this.audio.playNamed('FF_SND', { volume: 0.35, x: field.x, y: field.y })
       }
-    }
-  }
-
-  /** Runs the doors from their switch, or from proximity when nothing wires them. */
-  private updateDoors(): void {
-    for (const door of this.doors) {
-      door.update(this.signals.isDriven(door.objectIndex), this.player.x, this.player.y)
     }
   }
 
@@ -574,9 +731,7 @@ export class World {
   private pushOutOfBlockers(): void {
     const player = this.player
 
-    for (const solid of [...this.doors, ...this.blockers]) {
-      if (solid instanceof Door ? !solid.isSolid : solid.isDying || solid.isDead) continue
-
+    for (const solid of this.solidObjects()) {
       const box = solid.hitBox
       const left = player.x - player.halfWidth
       const right = player.x + player.halfWidth
@@ -620,102 +775,128 @@ export class World {
     }
   }
 
-  /** Damages a prop, and blows it up if that killed it. */
-  private hurtTarget(target: Prop, amount: number): void {
-    if (!target.damage(amount)) return
-    this.kills++
-    // Blow up over the middle of what died, not its feet.
-    this.effects.explode(target.x, target.y - target.height / 2)
-
-    if (!wallBlast(target.character)) {
-      this.audio.playNamed('P_EXPLODE_SND', { volume: 0.55, x: target.x, y: target.y })
-      return
+  /** Static geometry, plus whatever the logic says is solid this tick. */
+  private *solidObjects(): Iterable<Prop> {
+    for (const blocker of this.blockers) {
+      if (!blocker.isDying && !blocker.isDead) yield blocker
     }
+    for (const view of this.logic.views) {
+      if (!view.solid) continue
+      const prop = this.propsByIndex.get(view.index)
+      if (prop) yield prop
+    }
+  }
 
-    this.audio.playNamed('HWALL_SND', { volume: 0.6, x: target.x, y: target.y })
-    this.blastQueue.push(target)
-    this.runBlasts()
+  /* ---------------------------------------------------------------- *
+   * creatures, pickups and housekeeping
+   * ---------------------------------------------------------------- */
+
+  private updateEnemies(): void {
+    const player = this.player
+
+    this.enemies.update({
+      x: player.x,
+      y: player.y,
+      vx: player.vx,
+      vy: player.vy,
+      halfWidth: player.halfWidth,
+      height: player.height,
+      hidden: this.powers.concealment > SNEAKY_THRESHOLD,
+    })
+
+    // Respawn once the death animation has run its course.
+    if (player.isDead) return
+    if (player.health <= 0) {
+      // Back to the last console used, or the level's start if there was none.
+      player.revive(this.restartAt.x, this.restartAt.y)
+      // `restart_player` drops the power along with everything else.
+      this.powers.clear()
+      this.riding = null
+    }
   }
 
   /**
-   * Detonates hidden walls, and whatever their blast reaches.
+   * Picks up ammo, powers and health the player walks over.
    *
-   * This is the whole trick, and it is in the original's own lisp: a dying
-   * wall calls `hurt_radius` on itself - 110px for 120 damage from
-   * `big_wall_ai`, 50px for 60 from `hwall_ai` (lisp/doors.lsp). Against 25hp
-   * blocks that is lethal several times over, so the neighbours die, and their
-   * blasts kill *their* neighbours. One shot takes the room. It was never a
-   * group wired up in the level - it is a chain reaction, which is also why
-   * the blast hurts anything else standing in it.
-   *
-   * Worked through a queue rather than by recursing, so a long wall cannot
-   * blow the stack.
+   * The amount an ammo icon gives is its own `start_hp` ability, which is what
+   * `giver` reads (lisp/weapons.lsp); the slot it fills comes from
+   * `weapon_icon_ai`'s own table rather than from the icon's name, which is
+   * how the firebomb and the plasma rifle end up the right way round.
    */
-  private runBlasts(): void {
-    let guard = 0
+  private collectPickups(): void {
+    for (let i = this.props.length - 1; i >= 0; i--) {
+      const prop = this.props[i]
+      if (Math.abs(prop.x - this.player.x) > PICKUP_REACH) continue
+      if (Math.abs(prop.y - this.player.y) > PICKUP_REACH) continue
+      if (!this.takePickup(prop)) continue
 
-    while (this.blastQueue.length > 0 && guard++ < BLAST_LIMIT) {
-      const source = this.blastQueue.shift()!
-      const blast = wallBlast(source.character)
-      if (!blast) continue
+      prop.sprite.destroy()
+      this.props.splice(i, 1)
+      this.removeCombatant(prop)
+    }
+  }
 
-      const cx = source.x + blast.offsetX * source.direction
-      const cy = source.y + blast.offsetY
-
-      for (const other of this.targets) {
-        if (other === source || other.isDying || other.isDead) continue
-
-        const dx = other.x - cx
-        const dy = other.y - other.height / 2 - cy
-        if (dx * dx + dy * dy > blast.radius * blast.radius) continue
-
-        if (!other.damage(blast.amount)) continue
-        this.kills++
-        this.effects.explode(other.x, other.y - other.height / 2)
-        if (wallBlast(other.character)) this.blastQueue.push(other)
-      }
+  private takePickup(prop: Prop): boolean {
+    const slot = AMMO_ICON_SLOT[prop.character]
+    if (slot !== undefined) {
+      const rounds = this.assets.ability(prop.character, 'start_hp') ?? 1
+      const had = this.player.magazines[slot]
+      this.player.magazines[slot] += rounds
+      // Picking up ammo for something you were not carrying is how you get it.
+      if (had <= 0) this.player.selectWeapon(slot)
+      this.audio.playNamed('AMMO_SND', { volume: 0.6, x: prop.x, y: prop.y })
+      return true
     }
 
-    this.blastQueue.length = 0
+    const power = powerPickup(prop.character)
+    if (power) {
+      // The power is set first, so its raised ceiling is what the grant that
+      // follows is measured against - `health_power_ai` does them in that order.
+      this.powers.give(power.kind)
+      if (power.grant) {
+        givePlayerHealth(this.player, power.grant, { cap: this.powers.healthCap })
+      }
+      this.audio.playNamed('HEALTH_UP_SND', { volume: 0.6, x: prop.x, y: prop.y })
+      return true
+    }
+
+    if (prop.character === 'HEALTH') {
+      // `hp_up` is `(and (touching_bg) (give_player_health 20))`, so a player
+      // at full health leaves the heart lying there for later.
+      const healed = givePlayerHealth(this.player, HEART_HEAL, { cap: this.powers.healthCap })
+      if (!healed) return false
+      this.audio.playNamed('HEALTH_UP_SND', { volume: 0.6, x: prop.x, y: prop.y })
+      return true
+    }
+
+    return false
   }
 
   /**
    * Ages every corpse and clears the ones that have run their timer out.
    *
-   * The actors that got promoted out of `props` - turrets, ants, floaters -
-   * have to be swept too. They were not, so a dead one hung around frozen on
-   * whichever frame it died on, which for a character with no death state is
-   * its flinch: shoot a WHO and it turned red and stayed there.
+   * Only the props: the creatures own their own removal and never set Prop's
+   * `dead` flag, so ticking them here would destroy each sprite twice.
    */
   private retireDead(): void {
-    for (const list of [this.props, this.turrets, this.ants, this.floaters] as Prop[][]) {
-      for (let i = list.length - 1; i >= 0; i--) {
-        const prop = list[i]
-        prop.tickLifetime()
-        if (!prop.isDead) continue
+    for (let i = this.props.length - 1; i >= 0; i--) {
+      const prop = this.props[i]
+      prop.tickLifetime()
+      if (!prop.isDead) continue
 
-        prop.sprite.destroy()
-        list.splice(i, 1)
-        const t = this.targets.indexOf(prop)
-        if (t >= 0) this.targets.splice(t, 1)
-      }
+      this.props.splice(i, 1)
+      this.propsByIndex.delete(prop.objectIndex)
+      this.removeActor(prop)
     }
 
     // Blockers are the same objects `props` owns, so they are pruned rather
     // than retired - ticking them here as well would run every corpse timer
     // twice and destroy each sprite a second time.
     for (let i = this.blockers.length - 1; i >= 0; i--) {
-      const blocker = this.blockers[i]
-      if (!blocker.isDead) continue
-      this.blockers.splice(i, 1)
+      if (this.blockers[i].isDead) this.blockers.splice(i, 1)
     }
   }
 
-  /**
-   * Runs the teleporter pads: standing on one and pressing down starts its
-   * spin, and when the spin finishes the player is put down at the pad it is
-   * linked to.
-   */
   /**
    * Runs the save consoles: stand at one, press down, and the level id, your
    * position and everything you are carrying go to localStorage. It also moves
@@ -734,7 +915,14 @@ export class World {
       if (Math.abs(console.y - this.player.y) > CONSOLE_REACH_Y) continue
 
       this.restartAt = { x: console.x, y: this.player.y }
-      const state = snapshot(this.level.name, this.player, this.restartAt, this.kills, this.now)
+      const state = snapshot(
+        this.level.name,
+        this.player,
+        this.powers.kind,
+        this.restartAt,
+        this.kills,
+        this.now,
+      )
       const ok = writeSave(state)
 
       console.setState('running', true)
@@ -798,6 +986,10 @@ export class World {
     return this.exits.length
   }
 
+  /* ---------------------------------------------------------------- *
+   * drawing
+   * ---------------------------------------------------------------- */
+
   render(alpha: number, renderer: Renderer): void {
     const { camera } = this
     const viewW = camera.viewWidth
@@ -813,9 +1005,11 @@ export class World {
 
     this.updateProps(camera.x, camera.y, viewW, viewH, alpha)
     this.player.draw(alpha)
-    this.bullets.draw()
-    this.enemyBullets.draw()
-    this.effects.draw()
+    // After the cop's own draw, because the power multiplies onto the alpha
+    // the invulnerability blink has already set.
+    this.player.drawPowers(this.powers.visuals)
+    this.projectiles.draw(alpha)
+    this.fx.draw(alpha)
 
     this.fieldGraphics.clear()
     for (const field of this.forceFields) field.draw(this.fieldGraphics)
@@ -832,7 +1026,10 @@ export class World {
 
     // Renders to its own target, so it has to happen before the main pass.
     const { minLight, lights } = this.level.lighting
-    this.lights.update(renderer, lights, minLight, camera.x, camera.y, this.zoom)
+    // `hasLights` is false on almost every frame, so the merge costs nothing
+    // until something actually goes off.
+    const all = this.fx.hasLights ? [...lights, ...this.fx.lights] : lights
+    this.lights.update(renderer, all, minLight, camera.x, camera.y, this.zoom)
 
     this.messages.layout(viewW, viewH, this.zoom)
     this.statusBar.setHealth(this.player.health)
@@ -860,15 +1057,7 @@ export class World {
     const bottom = cameraY + viewH + margin
 
     let visible = 0
-    for (const prop of [
-      ...this.props,
-      ...this.platforms,
-      ...this.teleporters,
-      ...this.turrets,
-      ...this.ants,
-      ...this.floaters,
-      ...this.doors,
-    ]) {
+    for (const prop of [...this.props, ...this.teleporters, ...this.enemies.members]) {
       if (prop.x < left || prop.x > right || prop.y < top || prop.y > bottom) {
         prop.sprite.visible = false
         continue
@@ -893,26 +1082,30 @@ export class World {
   get propCounts(): { visible: number; total: number } {
     return {
       visible: this.visibleProps,
-      total:
-        this.props.length +
-        this.platforms.length +
-        this.teleporters.length +
-        this.turrets.length +
-        this.ants.length,
+      total: this.props.length + this.teleporters.length + this.enemies.members.length,
     }
   }
 
-  get platformStatus(): string {
-    const moving = this.platforms.filter((p) => p.isMoving).length
+  /** The power in hand, for the debug HUD. */
+  get powerLabel(): PowerKind | null {
+    return this.powers.kind
+  }
+
+  get powerActive(): boolean {
+    return this.powers.active
+  }
+
+  get status(): string {
     const spinning = this.teleporters.filter((t) => t.isCharging).length
-    const shots = this.bullets.liveCount
+    const shots = this.projectiles.liveCount
     return (
-      `${this.platforms.length} plat${moving ? `(${moving} moving)` : ''}` +
-      `${this.riding ? ' riding' : ''} ${this.teleporters.length} tele${spinning ? '(spinning)' : ''}` +
+      `${this.teleporters.length} tele${spinning ? '(spinning)' : ''}` +
+      `${this.riding !== null ? ' riding' : ''}` +
       `${shots ? ` ${shots} shots` : ''}` +
-      ` ${this.turrets.filter((t) => t.isAwake).length}/${this.turrets.length} turrets` +
-      ` ${this.ants.filter((a) => a.isActive).length}/${this.ants.length} ants` +
-      ` sig ${this.signals.counts.active}/${this.signals.counts.sensors + this.signals.counts.gates}` +
+      `${this.fx.particles.liveCount ? ` ${this.fx.particles.liveCount} puffs` : ''}` +
+      `${this.fx.gibs.liveCount ? ` ${this.fx.gibs.liveCount} gibs` : ''}` +
+      ` ${this.enemies.members.length} live` +
+      ` logic ${this.logic.counts.on}/${this.logic.counts.objects}` +
       `${this.kills ? ` kills ${this.kills}` : ''}`
     )
   }
@@ -927,8 +1120,8 @@ export class World {
    * few thousand sprites each time.
    */
   destroy(): void {
-    this.bullets.clear()
-    this.enemyBullets.clear()
+    this.projectiles.clear()
+    this.fx.clear()
     this.lights.destroy()
     this.messages.destroy()
     this.statusBar.destroy()
@@ -936,16 +1129,16 @@ export class World {
   }
 
   /**
+   * Tick count, used only to stamp saves and to beat the force fields. The
+   * loop already counts, and this keeps the world free of wall-clock reads.
+   */
+  private now = 0
+
+  /**
    * Picks a start position: the level's START marker, falling back to a
    * respawn point, then nudged out of any rock it happens to sit in and
    * dropped onto the first floor below.
    */
-  /**
-   * Tick count, used only to stamp saves. `Date.now` would do, but the loop
-   * already counts and this keeps the world free of wall-clock reads.
-   */
-  private now = 0
-
   private findSpawn(): { x: number; y: number } {
     const marker = this.level.findObject('START', 'RESTART_POSITION')
     const probe = {
@@ -967,7 +1160,7 @@ export class World {
     return { x: probe.x, y: probe.y }
   }
 
-  /** Object markers, exposed for the debug HUD until real entities exist. */
+  /** Object markers, exposed for the debug HUD. */
   get objectSummary(): string {
     const counts = new Map<string, number>()
     for (const o of this.level.objects) counts.set(o.type, (counts.get(o.type) ?? 0) + 1)
@@ -976,5 +1169,113 @@ export class World {
       .slice(0, 6)
       .map(([type, n]) => `${type}x${n}`)
       .join(' ')
+  }
+}
+
+/**
+ * The cop as the level logic sees him: a position, whether the action key is
+ * down, and two ways to be moved by a lift.
+ */
+class PlayerFocus implements LogicFocus {
+  pressingAction = false
+
+  constructor(
+    private readonly player: Player,
+    private readonly level: Level,
+  ) {}
+
+  get x(): number {
+    return this.player.x
+  }
+
+  get y(): number {
+    return this.player.y
+  }
+
+  /** `try_move` - shift, stopping at the first solid tile. */
+  tryMove(dx: number, dy: number): void {
+    moveAndCollide(this.level, this.player, dx, dy)
+  }
+
+  /** `set_y` - raw placement, which is how a lift takes you aboard. */
+  setFeetY(y: number): void {
+    this.player.y = y
+    this.player.landOn(y)
+  }
+}
+
+/**
+ * What the special powers are allowed to touch.
+ *
+ * Thin on purpose: everything except `step` is a straight forward to the cop,
+ * and `step` is a whole movement tick because that is literally how FAST works
+ * - `do_special_power` runs a second `player_move` before the tick's own.
+ */
+class CopPowerHost {
+  /**
+   * The buttons this tick was read with. FAST's extra step re-uses them rather
+   * than inventing its own, so holding shift still decides how fast the second
+   * step goes and the power stacks on top of the run instead of replacing it.
+   */
+  buttons: InputState | null = null
+
+  constructor(
+    private readonly player: Player,
+    private readonly fx: EffectsSystem,
+  ) {}
+
+  get x(): number {
+    return this.player.x
+  }
+
+  set x(value: number) {
+    this.player.x = value
+  }
+
+  get y(): number {
+    return this.player.y
+  }
+
+  set y(value: number) {
+    this.player.y = value
+  }
+
+  get vy(): number {
+    return this.player.vy
+  }
+
+  set vy(value: number) {
+    this.player.vy = value
+  }
+
+  get facing(): 1 | -1 {
+    return this.player.direction < 0 ? -1 : 1
+  }
+
+  get legHeight(): number {
+    return this.player.currentFrame?.height ?? 0
+  }
+
+  get legState(): string {
+    return this.player.state
+  }
+
+  step(): void {
+    if (!this.buttons) return
+    // The jump is not re-armed: `consumeJump` is edge-triggered, and letting a
+    // single press through twice in one tick would be a double jump.
+    this.player.update(this.buttons, false)
+  }
+
+  setLegState(state: string): void {
+    this.player.setLegState(state)
+  }
+
+  coolWeapon(ticks: number): void {
+    this.player.coolWeapon(ticks)
+  }
+
+  spawnCloud(x: number, y: number): void {
+    this.fx.particles.spawn('CLOUD', x, y)
   }
 }

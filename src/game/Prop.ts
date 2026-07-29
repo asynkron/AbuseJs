@@ -114,8 +114,13 @@ export class Prop extends Entity {
   /**
    * Applies damage. Returns true if this killed it, which switches to the
    * death animation if the character has one and starts the removal timer.
+   *
+   * `fromCharacter` is the character name of whatever dealt the blow - the
+   * `from` argument every damage call in the scripts carries. Scenery has no
+   * use for it; the creatures in src/game/enemies override this and read it to
+   * decide whether the shot came from one of their own.
    */
-  damage(amount: number): boolean {
+  damage(amount: number, _fromCharacter?: string): boolean {
     if (!this.hurtable || this.deathTimer > 0 || this.dead) return false
 
     this.health -= amount

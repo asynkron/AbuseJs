@@ -122,14 +122,16 @@ exists and fall back to our TypeScript when it does not. That makes the port inc
 reversible rather than a big-bang swap — and it means the enemy AI in `ant.lsp` and friends arrives
 for free once the hooks are in.
 
-**5. Delete our stand-ins as the scripts take over.** `Door`, `CeilingAnt`, `Turret`, `Floater` and
-the hidden-wall blast in `World` were all reconstructions of script behaviour. They go when the
-script runs. `Player`, `Weapons`, `Bullets`, the CRT, the lighting and the audio stay.
+**5. Delete our stand-ins as the scripts take over.** Done for the first batch: `Door`, `Platform`,
+`Signals`, `CeilingAnt`, `Turret`, `Floater`, `Bullets`, `Effects`, `Weapons` and the hidden-wall
+blast in `World` were all reconstructions, and all of them are gone — replaced by
+`src/game/{effects,weapons,enemies,logic,powers}`, which read the scripts. `Player`, `ForceField`,
+`Teleporter`, the CRT, the lighting and the audio stay.
 
 ## What stays ours
 
-Player physics, the eight weapons, the special powers, weapon selection, the save console, the CRT
-pass, the lighting layer, the music player, the asset pipeline, and every rendering decision. The
+Player physics, weapon selection, the save console, the CRT pass, the lighting layer, the music
+player, the asset pipeline, and every rendering decision. The
 scripts describe what the *level* does. What the game feels like is still ours to choose.
 
 ## Known trap

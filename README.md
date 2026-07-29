@@ -7,9 +7,10 @@ game mechanics. Rendering is PixiJS v8 (WebGL/WebGPU); everything else is ours.
 
 Current state: real Abuse levels load with their lighting, tile layers, objects, ambience, music and
 tutorial text; the cop runs, jumps, climbs ramps, rides platforms, takes teleporters and walks
-between levels through the original exit portals. It shoots, and the level shoots back — turrets
-wake and track, ceiling ants drop on you, and both can kill you. The levels' own sensor-and-gate
-wiring drives the doors and lifts.
+between levels through the original exit portals. It shoots, and the level shoots back — ants,
+flyers, juggers, cleaner robots and the boss all think, ant cracks pour more of them into a room,
+and everything fires the original's own eight projectiles. The levels' sensor-and-gate wiring drives
+the doors and lifts, and the four special powers do what the scripts say they do.
 
 ```bash
 npm install
@@ -97,21 +98,30 @@ live next to the code that uses them; the highlights:
 
 ## Mechanics
 
-These are ours, not the original's — the original's live in a Lisp interpreter we do not have. What
-we take from the shipped data is the *wiring*: which switch drives which door, where a platform's
-travel ends, which frame a turret uses when aiming 30° up-left.
+Behaviour now comes from the shipped `.lsp` scripts rather than from invention: the AI functions,
+the weapon table, the explosion clusters and the gate wiring are all read out of
+`assets/original/lisp` and cited where they land. The player's *feel* — acceleration, jump arc,
+coyote time, weapon selection — is still ours, and says so.
 
 **Eight weapons.** The status bar has eight slots, the art ships eight lit/dim icon pairs, every
-weapon has its own 24-frame torso in `art/coptop.spe`, and the levels scatter ammo for all of them —
-so that is what there is. The pickup prefix ties an icon to a slot: `GRENADE_ICON10` is ten grenades.
+weapon has its own 24-frame torso in `art/coptop.spe`, and the levels scatter ammo for all of them.
+The slot an ammo icon fills comes from `weapon_icon_ai`'s own table and the amount from the icon's
+`start_hp`, which is how the firebomb (3) and the plasma rifle (4) end up the right way round.
 Picking up ammo for something you were not carrying is also how you get the weapon.
 
-All eight are hitscan; what separates them is rate, damage, tracers per pull, spread and whether the
-impact hurts what is standing near it. The machine gun is 5 damage every 3 ticks (`do_damage 5` from
-`weapons.lsp`); the rocket is 30 every 34 with a 60px splash; the disc frisbee throws five tracers
-over 44°. Out of ammo the machine gun does not stop, it labours — 3 ticks with, 7 without, which is
-what "collect ammo to increase firing speed" in the tutorial means. The other seven simply are not
-there to fire.
+They are real projectiles, not tracers. A grenade arcs and detonates on its first blocked move; a
+rocket accelerates to 14 and homes on whatever the ±160px search locked onto, and can be shot out of
+the air because `ROCKET` is `(hurtable T)` with 4hp; the firebomb skids along the floor spewing 40
+damage over 60px every tick it burns; the disc steers towards the crosshair the long way round,
+because `angle_diff` is not a shortest-arc calculation and that spiral is what the shipped weapon
+does. Only the plasma bolt and the light sabre resolve at the muzzle, which is what the originals do
+too. Out of ammo the machine gun does not stop, it labours — 3 ticks with, 7 without, which is what
+"collect ammo to increase firing speed" in the tutorial means. The other seven simply are not there
+to fire, and none of them fires at all when the muzzle is inside a wall.
+
+Everything shares one target list, the cop included. That is what `bmove` does — it hits whatever is
+in the way and spares only the shooter — so enemy fire hits other enemies, and standing next to your
+own grenade costs you health.
 
 **1–8** pick a slot and **Q** steps through what you are carrying, skipping empty ones. The original
 says "use the CTRL & INS keys", which is undiscoverable on a laptop. Not the scroll wheel: one
@@ -120,36 +130,37 @@ slot the moment you moved your hand, and a trackpad's deltas cannot be reliably 
 wheel's.
 
 The muzzle is not the player's centre: it comes from the 24-entry `small_fire_off` table in the
-original `src/cop.cpp`, so the tracer leaves the actual gun barrel through a full rotation.
+original `src/cop.cpp`, so a shot leaves the actual gun barrel through a full rotation.
 
 **Special powers**, held on **C** or the right mouse button — "hold down the right mouse button to
 use special powers", as the tutorial puts it. The levels place four (`POWER_FAST`, `POWER_FLY`,
-`POWER_SNEAKY`, `POWER_HEALTH`); a pickup is worth 360 ticks of use and only drains while the button
-is down. FAST halves the fire delay, FLY turns gravity into a hover that up and down steer, HEAL
-gives back a point every 8 ticks, and SNEAKY stops anything noticing you — it does not call off a
-fight already under way.
+`POWER_SNEAKY`, `POWER_HEALTH`). They never expire: `special_power` is cleared by `restart_player`
+and by nothing else, and the one duration in either script — `(user_fun SET_FAST_TIME 360)` — is
+commented out in the shipped game, so the charge bar this port used to draw was restoring a line
+that never ran.
 
-**Turrets** (`SPRAY_GUN`, `TRACK_GUN`) sit dormant until you come within 260px, then play their
-open animation, track you through their 24 aim frames, and after a 25-tick wind-up fire every 40
-ticks for 6 damage. They close again with a 60px hysteresis margin so they do not flutter at the
-edge of range.
+FAST is not a multiplier: while the button is down the cop takes a complete second movement step
+before the tick's own, so collision and animation happen twice, and it burns an extra tick off the
+weapon cooldown as well. FLY leaves gravity on and pushes −2 into the vertical velocity every tick
+(−3 with up held) — the hover is the balance between the two, and letting go is how you descend.
+HEALTH raises the ceiling from 100 to 200 and grants one top-up; it does not regenerate. SNEAKY
+fades the cop out and stops anything noticing him, though it does not call off a fight already under
+way. FAST and FLY also swap in DARNEL's own `fast_*` and `fly_*` animation sets, which hide the
+aiming torso — `top_draw_state` does not list them.
 
-**Ceiling ants** (`ANT_ROOF`) do what their state list says they should: `top_walk` along the
-ceiling towards you, `fire_wait`/`ceil_fire` to shoot straight down, and `fall_start`/`falling`/
-`landing` to come down and fight on the floor. They drop when the floor below is within 400px and
-stay up and shoot when it is not, and being shot wakes one wherever it is. Contact costs 8 with a
-45-tick cooldown.
+**The creatures think.** Ants walk the ceiling, shoot straight down, drop and fight on the floor;
+`ANT_CRACK` pours more of them into a room; flyers, juggers, cleaner robots and the two-form boss
+all run their own scripts. A shooter's `aitype` *is* its weapon — the same number picks its tint,
+its health and the round it fires — so an AI shoots by handing its aitype to the same `fire_object`
+the cop uses.
 
-**Floaters** (`WHO`) are the hovering robot in `art/rob2.spe` and the only creature the training
-level contains. They bob on a patrol line, drift towards you when you come within 300px, play the
-full nine-frame `turn_around` when they reverse, and `flinch_up` when hit.
-
-**Deaths pop.** `EG_EXPLO`'s four-frame blast goes off over the middle of anything that dies, with
-`P_EXPLODE_SND` behind it. Most characters have no `dieing` or `dead` state — `WHO` has neither — so
-those are cleared on the next tick rather than lingering for the corpse timer, which would only hold
-them on whichever frame they died on. The corpse countdown runs from the simulation, not the draw
-pass: the draw pass skips anything off screen, so a body killed just as it scrolled away would wait
-forever for a tick that only arrived if you looked back at it.
+**Deaths are authored, not generic.** Nothing in the original puts one stock explosion over
+everything that dies. A turret throws four fireballs at delays 0,1,2,3 over `BLOWN_UP`; a flyer
+throws three on the beat; ROB1 gets eight at fixed offsets across six ticks; a boulder gets four and
+a light. An ant gets no explosion at all — it comes apart into five body parts that tumble, bounce
+and settle on the floor, flaming or electric depending on what killed it (`get_dead_part` reads the
+otype of the killing shot). All of it plays at the engine's rate, one animation frame per tick,
+which is a quarter of the simulation's.
 
 **Exits announce themselves.** The levels put no TRAIN_MSG on their `NEXT_LEVEL` portals — the
 original expects you to recognise one on sight — so it was possible to walk past the end of a level
@@ -163,18 +174,21 @@ flicker and `running` is `console_on`, so the art already had an activated look 
 down at one and the level id, your position, health, every magazine and the power you are holding go
 to `localStorage`; dying returns you there instead of to `START`, and so does reloading the page.
 
-**Platforms and teleporters** read their endpoints out of the level: a platform's travel is the
-`xacel`/`yacel` pair, its surface is the top of its own sprite, and `start_accel` is how far away
-you can grab it. Riding one carries you continuously rather than in steps, and stepping off it
-keeps the coyote timer alive so a jump off a moving lift works.
+**Platforms and teleporters** read their endpoints out of the level. A lift's two links *are* its
+endpoints and an optional third is its enable switch; `xacel` is how many interpolation steps the
+trip takes, so a lower number is a faster lift. `platform_ai` boards you with `(set_y (- (y)
+start_accel))` — 22px above the anchor for the small platform, whose picture is only 15 tall — so
+the deck is the top of the sprite but the band that counts as standing on it is `start_accel` either
+way. Riding carries you continuously rather than in steps, and stepping off keeps the coyote timer
+alive so a jump off a moving lift works.
 
 **Hidden walls chain.** A wall is not one object — level01 has 102 blocks of 25hp each — and the
 thing that makes a room open from one shot is in the original's own lisp. A dying wall calls
 `hurt_radius` on itself: 110px for 120 damage from `big_wall_ai`, 50px for 60 from `hwall_ai`
 (lisp/doors.lsp). Against 25hp blocks that is lethal several times over, so the neighbours die and
-their blasts kill *their* neighbours. One shot into a fourteen-block run takes twenty-four blocks
-with it, and the blast hurts anything else standing in it. Worked through a queue rather than by
-recursing.
+their blasts kill *their* neighbours. One shot measured into level01 takes twenty-five blocks with
+it. There is no special case for any of this: the walls are in the same target list as everything
+else, which is also why the blast catches whatever is standing in it.
 
 They also crack as you shoot them: `hwall_damage` sets the frame from the health fraction, so the
 three `sect` frames are progressive damage rather than an idle animation.
@@ -185,7 +199,8 @@ screen. What you should see is four scattered vertical lines from the object dow
 the four colour pairs and widths `ascatter_line` is called with. `ff_ai` finds that floor with
 `(try_move 0 (+ (y) 200))`, plays FF_SND every fourth tick and shoves the player out with
 `(ff_push (first_focus) 35)`. All three in level01 are wired to their own switch, so they are off
-until something turns them on.
+until something turns them on — the gate is `(activated)`, which is true for a field nothing wires
+and follows the switch for one that is.
 
 **Doors block.** `SWITCH_DOOR` and the trap doors carry `can_block` and a four-state set: `stopped`
 is shut, `running` runs the shutter open, `walking` runs the same frames back. Collision is
@@ -205,13 +220,12 @@ and anything else you are meant to stand on.
 A door wired to a switch does what the network says. An unwired one opens for whoever walks up to it.
 
 **The signal network** is the level's own. Every object carries an `aistate`, and `object_links`
-wires sensors to gates to consumers; `Signals.ts` settles the network over four passes each tick and
-then hands the result to the doors, lifts and force fields that read it. `GATE_DELAY` passes its input on after 22 ticks — the saved objects carry no delay of their own, but
-what they are for is visible in the wiring: level01 chains four of them, each driving one of a row of
-four doors, so the row opens in sequence. Its clock runs once per tick rather than inside the settle
-loop, which runs several times and would expire a 22-tick delay in five. Links are stored 1-based
-(`write_links` counts from 1) and a link can point either way — a door names its switch, but
-level00's sensor names the platform it drives — so the index is built in both directions.
+wires sensors to gates to consumers. The seventeen types that drive it — the six switches, the six
+gates, the sensors, the doors, the step and the three lifts — each run their real ai function once
+per tick in level order, which is why a chain of delay gates advances one link per tick instead of
+settling instantly. Links are stored 1-based (`write_links` counts from 1) and a link can point
+either way — a door names its switch, but level00's sensor names the platform it drives — so the
+index is built in both directions.
 
 **Damage and death.** 100 health, 30 ticks of invulnerable blink after a hit, and a 120-tick death
 animation before respawning at `START` with a full bar. `hurt()` refuses while the body is already
@@ -327,18 +341,30 @@ here obeys the mute gate — a muted page loads no music at all.
 - **Editor-only art can still leak through.** `FORCE_FIELD` was drawing its marker because the
   converter's editor-only detection looks for a bare `(draw)`, and `ff_draw` guards it with
   `(if (edit_mode) ...)` instead. Other characters may do the same.
-- **Only three enemies think.** Turrets, ceiling ants and floaters fight; everything else still
-  spawns as scenery. Ground ants, the jugger, the trex and the flying enemies have all their art
-  and states converted and no behaviour attached.
-- **Nothing spawns.** level01 ships 13 `HIDDEN_ANT` and 10 `ANT_CRACK` - the markers the original
-  used to pour ants into a room - and both are inert here.
-- **Turret shots do not lead you.** They fire along the angle to where you are, so strafing beats
-  them. And nothing an enemy fires can hit another enemy.
+- **The `lvars` chunk is not read.** `tools/convert.ts` skips it, so every per-object setting the
+  levels keep there falls back to the scripts' constructor default: `create_total`, `hide_flag`,
+  `stationary`, the jugger's throw velocity, the flyer's burst configuration, `delay_time`,
+  `pulse_speed`, `reset_time`, `unoffable`. Two visible consequences — every jugger walks, since 21
+  of the 52 should be turrets and nothing distinguishes them, and `GATE_DELAY` uses the commonest
+  shipped value rather than its own. Both subsystems take the real values through a seam the moment
+  the converter emits them.
+- **`def_explo` is not expanded.** It builds eleven characters through `eval`, so `tools/lisp.ts`
+  never sees a literal `def_char` and none of them reach `chars.json`; the same goes for the 24 gib
+  characters. Their catalogues are spelled out by hand in `src/game/effects/sprites.ts` and
+  `DeathEffects.ts` against frames that are all present in the atlas. Teaching the extractor to
+  expand the form would let both tables be deleted.
+- **A weapon kill does not colour its gibs.** `get_dead_part` picks flaming or electric parts from
+  the otype of the killing shot, but the projectile host's damage call has no room for a source, so
+  everything a weapon kills comes apart into the plain set. Blasts that go through the effects
+  subsystem directly — the hidden walls — do carry it.
 - **Enemies do not come back.** Kill one and the level is that much emptier until you reload it;
-  there is no respawn or spawner logic.
-- **The weapons differ by numbers, not by physics.** All eight are hitscan tracers. Nothing arcs,
-  nothing travels, nothing bounces — a grenade is a fast shot with a splash radius rather than a
-  thrown object.
+  there is no respawn logic beyond `ANT_CRACK`.
+- **The full-screen tints are missing.** `tint_palette` and `make_view_solid` — the red damage ramp,
+  the mine's flash, POWER_FAST's white flash — are present-pass effects and belong in the CRT
+  filter. SNEAKY's "predator" refraction is drawn as a very low alpha for the same reason.
+- **Thirteen level-logic behaviours are still out.** Bombs, mines, lava, teleport pads, TP_DOORs,
+  ladders, springs, pushers, lightning, dimmers, movers, holders and `DEATH_RESPAWNER` have no
+  implementation; the seventeen switch/gate/door/lift types do.
 - **18 addon levels reference tiles that were never shipped** — mostly `addon/claudio/*` and
   `addon/pong/*`, plus a dozen stray cells in `levels/frabs18` and `levels/frabs30`. `abuse.lsp`
   says as much: claudio's palettes "can only be used with the art files by other authors". Unknown

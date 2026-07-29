@@ -8,7 +8,6 @@ import { Input } from './core/input'
 import { Level } from './game/Level'
 import { World } from './game/World'
 import { CrtFilter, crtGridPeriod, crtPixelScale } from './render/CrtFilter'
-import { POWER_LABEL } from './game/Weapons'
 
 /**
  * Smallest logical view we are willing to show. The stage is scaled by an
@@ -344,7 +343,7 @@ async function start() {
             `${world.player.onGround ? '' : ' (air)'}  x${zoom}  ${fps}fps  ${world.spriteCount} sprites` +
             `  ${world.lights.visibleCount}/${level.lighting.lights.length} lights` +
             ` @ambient ${level.lighting.minLight}/63`,
-          `props ${world.propCounts.visible}/${world.propCounts.total} drawn   ${world.platformStatus}` +
+          `props ${world.propCounts.visible}/${world.propCounts.total} drawn   ${world.status}` +
             `   audio ${
               audio.muted
                 ? 'muted'
@@ -354,8 +353,8 @@ async function start() {
           `arrows/WASD move   space jump   shift run   down/E use   X or LMB fire` +
         `   1-8/Q weapon   C or RMB special` +
         `${world.savedMessage > 0 ? '   *** GAME SAVED ***' : ''}` +
-        `   [${world.player.weaponDef.name}` +
-        `${world.player.power ? `  ${POWER_LABEL[world.player.power]} ${world.player.powerCharge}${world.player.powerActive ? '*' : ''}` : ''}]` +
+        `   [${world.player.weaponSlot.name}` +
+        `${world.powerLabel ? `  ${world.powerLabel.toUpperCase()}${world.powerActive ? '*' : ''}` : ''}]` +
             `   V crt:${crtEnabled ? 'on' : 'off'}   L light:${world.lights.enabled ? 'on' : 'off'}`,
         ].join('\n')
       }
