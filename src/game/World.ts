@@ -29,6 +29,7 @@ import {
 import { Prop, spawnProps } from './Prop'
 import { CONSOLE_LIT_TICKS, readSave, restore, snapshot, writeSave } from './SaveGame'
 import { buildTeleporters, type Teleporter } from './Teleporter'
+import { buildTeleportDoors, type TeleportDoor } from './TeleportDoor'
 import { TrainMessages } from './TrainMessages'
 import {
   AMMO_ICON_SLOT,
@@ -125,6 +126,7 @@ export class World {
   private readonly props: Prop[]
   private readonly propsByIndex = new Map<number, Prop>()
   private readonly teleporters: Teleporter[]
+  private readonly teleportDoors: TeleportDoor[]
   private readonly forceFields: ForceField[]
   private readonly fieldGraphics = new Graphics()
 
@@ -249,6 +251,7 @@ export class World {
     // Each of these takes the inert props the level spawned for its own types
     // out of the list and drives them itself.
     this.teleporters = buildTeleporters(assets, level.objects, level.links, this.props)
+    this.teleportDoors = buildTeleportDoors(assets, level.objects, level.links, this.props)
     this.forceFields = buildForceFields(level.objects, this.props, level)
 
     this.focus = new PlayerFocus(this.player, level)
@@ -273,7 +276,7 @@ export class World {
       onFire: (shot) => this.fireEnemyShot(shot),
     })
 
-    for (const prop of [...this.props, ...this.teleporters, ...this.enemies.members]) {
+    for (const prop of [...this.props, ...this.teleporters, ...this.teleportDoors, ...this.enemies.members]) {
       this.propLayer.addChild(prop.sprite)
       if (prop.objectIndex >= 0) this.propsByIndex.set(prop.objectIndex, prop)
       if (prop.hurtable) this.addCombatant(prop)
@@ -367,6 +370,7 @@ export class World {
     this.rideLifts()
     this.updateForceFields()
     this.useTeleporters(activating)
+    this.useTeleportDoors(activating)
     this.useConsoles(activating)
     this.pushOutOfBlockers()
     this.collectPickups()
@@ -934,6 +938,36 @@ export class World {
     if (this.savedMessage > 0) this.savedMessage--
   }
 
+  /**
+   * Runs the TP_DOOR pairs: they slide open on approach, open their partner
+   * with them, and carry the player across while the action key is held.
+   *
+   * The key is the part nothing tells you about, so standing in an open
+   * doorway and having nothing happen is the expected first experience. It
+   * gets a prompt, the same as the exits did.
+   */
+  private useTeleportDoors(activating: boolean): void {
+    for (const door of this.teleportDoors) {
+      const sound = door.update(this.player.x, this.player.y)
+      if (sound) this.audio.playNamed(sound, { volume: 0.6, x: door.x, y: door.y })
+
+      if (!door.covers(this.player.x, this.player.y)) continue
+      if (!door.partner) continue
+
+      if (!activating) {
+        this.messages.prompt('Press down to step through')
+        continue
+      }
+
+      this.player.setPosition(door.partner.x, door.partner.y)
+      this.player.vx = 0
+      this.player.vy = 0
+      this.riding = null
+      this.audio.playNamed('TELE_SND', { volume: 0.7, x: door.partner.x, y: door.partner.y })
+      return
+    }
+  }
+
   private useTeleporters(activating: boolean): void {
     for (const pad of this.teleporters) {
       const arrival = pad.update()
@@ -1057,7 +1091,7 @@ export class World {
     const bottom = cameraY + viewH + margin
 
     let visible = 0
-    for (const prop of [...this.props, ...this.teleporters, ...this.enemies.members]) {
+    for (const prop of [...this.props, ...this.teleporters, ...this.teleportDoors, ...this.enemies.members]) {
       if (prop.x < left || prop.x > right || prop.y < top || prop.y > bottom) {
         prop.sprite.visible = false
         continue

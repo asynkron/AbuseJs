@@ -229,6 +229,12 @@ and anything else you are meant to stand on.
 
 A door wired to a switch does what the network says. An unwired one opens for whoever walks up to it.
 
+**Teleport doors** (`TP_DOOR`) are neither a pad nor a `SWITCH_DOOR`. `tpd_ai` in
+lisp/teleport.lsp gives them three jobs: slide open when you come near, open the *partner* at the
+same moment so you can see the far end gaping, and carry you across while the action key is held.
+They carry no `can_block`, so standing in the opening is the point — which is exactly why nothing
+happening reads as a broken door. The original never mentions the key, so this one prompts.
+
 **The signal network** is the level's own. Every object carries an `aistate`, and `object_links`
 wires sensors to gates to consumers. The seventeen types that drive it — the six switches, the six
 gates, the sensors, the doors, the step and the three lifts — each run their real ai function once
