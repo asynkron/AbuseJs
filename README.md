@@ -172,7 +172,14 @@ tile-based and a door is an object, so until they were given a collision pass of
 door was a picture you strolled through — as were the hidden walls, of which level01 has over eighty.
 Anything solid that is not a tile now pushes the player out along whichever axis needs the least
 movement, resolved after the tile pass; doors and hidden walls are thin slabs in corridors, so the
-shallow axis is always the right one.
+shallow axis is always the right one. A lip within 8px of the player's feet is stepped onto instead —
+the same tolerance the tile collision uses, and needed for the same reason, since hidden walls sit
+flush in floors and being shoved sideways off one feels like catching on nothing.
+
+The list of solid objects is not `can_block`: that flag is on more than sixty characters, including
+every platform, both turrets, the T_REX and `NEXT_LEVEL`. In the original it means "this *can*
+block", with the blocking driven from lisp state, so reading it as "is solid" walls off exit portals
+and anything else you are meant to stand on.
 
 A door wired to a switch does what the network says. An unwired one opens for whoever walks up to it.
 

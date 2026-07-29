@@ -37,6 +37,25 @@ const MAX_HEALTH = 100
 /** How close the player has to be to collect something. */
 const PICKUP_REACH = 18
 
+/**
+ * Objects the player collides with as if they were terrain.
+ *
+ * Not `can_block`, which is on more than sixty characters - every platform,
+ * both turrets, the T_REX, and NEXT_LEVEL. In the original it means "this can
+ * block", with the actual blocking driven from lisp state, so taking it as
+ * "is solid" walls off exit portals and anything else you are meant to stand
+ * on. This is the list of things that are just geometry.
+ */
+const BLOCKER_TYPES = /^(HIDDEN_(WALL|RAMP)|BOLDER$|BLOCK$|STEP$)/
+
+/**
+ * A blocker whose top is within this of the player's feet is stepped onto
+ * rather than walked into. The tile collision has the same tolerance for the
+ * same reason: hidden walls sit flush in floors, and pushing sideways off one
+ * feels like catching on nothing.
+ */
+const BLOCKER_STEP_HEIGHT = 8
+
 /** How close the player must stand to a save console to use it. */
 const CONSOLE_REACH_X = 26
 const CONSOLE_REACH_Y = 40
@@ -194,7 +213,7 @@ export class World {
       if (prop.hurtable) this.targets.push(prop)
     }
     for (const prop of this.props) {
-      if (assets.hasFlag(prop.character, 'can_block')) this.blockers.push(prop)
+      if (BLOCKER_TYPES.test(prop.character)) this.blockers.push(prop)
     }
 
     this.ambience = new AmbientSounds(audio, level.objects)
@@ -522,6 +541,15 @@ export class World {
       const pushLeft = right - box.left
       const pushDown = box.bottom - top
       const pushUp = bottom - box.top
+
+      // A shallow lip underfoot is a step, not a wall.
+      if (pushUp <= BLOCKER_STEP_HEIGHT && player.vy >= 0) {
+        player.y = box.top
+        player.vy = 0
+        player.landOn(box.top)
+        continue
+      }
+
       const least = Math.min(pushRight, pushLeft, pushDown, pushUp)
 
       if (least === pushRight) {
