@@ -152,6 +152,19 @@ export class Player extends Entity {
     }
   }
 
+  /**
+   * Puts the player on a surface the tile grid knows nothing about - a moving
+   * platform. This has to refresh the coyote timer as well as the flag:
+   * `update` only ever renews it from tile grounding, so without this the
+   * player can stand on a platform but never jump off it.
+   */
+  landOn(surfaceY: number): void {
+    this.y = surfaceY
+    if (this.vy > 0) this.vy = 0
+    this.onGround = true
+    this.coyote = PHYSICS.coyoteTicks
+  }
+
   /** Root motion has to respect walls like any other movement. */
   protected override applyRootMotion(dx: number): void {
     moveAndCollide(this.level, this, dx, 0)

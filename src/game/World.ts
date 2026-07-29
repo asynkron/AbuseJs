@@ -141,14 +141,12 @@ export class World {
       )
     }
 
-    // Platforms move first, then carry their rider, then the player's own
-    // physics runs on top of that.
+    // Platforms move, then the player's own physics runs, then the carry and
+    // the landing snap are applied. The carry has to come *after* the player's
+    // update: that is what captures the position render interpolation starts
+    // from, so carrying beforehand would make the player jump a tick ahead of
+    // the platform it is standing on.
     for (const platform of this.platforms) platform.update()
-    if (this.riding) {
-      this.player.x += this.riding.deltaX
-      this.player.y += this.riding.deltaY
-    }
-
     this.player.update(input.state, input.consumeJump())
     this.ridePlatforms(input.state.action || input.state.down)
 
@@ -171,7 +169,18 @@ export class World {
    * platform on its way if they press the action key while standing there.
    */
   private ridePlatforms(activating: boolean): void {
+    const wasRiding = this.riding
     this.riding = null
+
+    // Carry along with whatever was being ridden last tick. The downward
+    // component matters: a descending platform would otherwise drop out from
+    // under the player, who free-falls and re-lands on it every few ticks -
+    // which reads as the platform bouncing. Upward velocity means they jumped,
+    // so let them go.
+    if (wasRiding && this.player.vy >= 0) {
+      this.player.x += wasRiding.deltaX
+      if (wasRiding.deltaY > 0) this.player.y += wasRiding.deltaY
+    }
 
     for (const platform of this.platforms) {
       const { left, right, y } = platform.surface
@@ -182,9 +191,7 @@ export class World {
       const distance = y - this.player.y
       if (this.player.vy < 0 || distance > 1 || distance < -PLATFORM_GRAB) continue
 
-      this.player.y = y
-      this.player.vy = 0
-      this.player.onGround = true
+      this.player.landOn(y)
       this.riding = platform
 
       if (activating) platform.trigger()

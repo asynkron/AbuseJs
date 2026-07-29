@@ -16,8 +16,10 @@ import { Prop } from './Prop'
  */
 
 /**
- * Platform steps happen at the original's logic rate rather than the render
- * rate, so `xacel` reads as the same duration it did in 1995.
+ * The original advances a platform one step per logic tick and runs its logic
+ * slower than we render. Keeping that as discrete jumps would make the
+ * platform visibly stutter, so the travel time is preserved - `xacel` steps at
+ * the original's rate - while the motion itself is continuous.
  */
 const TICKS_PER_STEP = 4
 const DEFAULT_STEPS = 40
@@ -31,12 +33,12 @@ export class Platform extends Prop {
   /** How far above `y` a rider's feet sit. */
   readonly snapOffset: number
 
-  private readonly steps: number
+  /** Total travel time in ticks. */
+  private readonly duration: number
   /** 0 = resting at `from`, 1 = resting at `to`. */
   private atEnd = 0
-  private step = 0
+  private elapsed = 0
   private moving = false
-  private tickCounter = 0
 
   /** Movement applied this tick, for carrying riders. */
   deltaX = 0
@@ -47,7 +49,7 @@ export class Platform extends Prop {
     this.from = endpoints[0]
     this.to = endpoints[1]
     this.snapOffset = assets.ability(data.type, 'start_accel') ?? DEFAULT_SNAP
-    this.steps = Math.max(4, data.xacel || DEFAULT_STEPS)
+    this.duration = Math.max(4, data.xacel || DEFAULT_STEPS) * TICKS_PER_STEP
 
     // Levels place the platform at one of its endpoints; start from whichever
     // it is actually sitting on.
@@ -74,35 +76,35 @@ export class Platform extends Prop {
   trigger(): boolean {
     if (this.moving) return false
     this.moving = true
-    this.step = 0
+    this.elapsed = 0
     return true
   }
 
   update(): void {
+    // Render interpolation reads these; without updating them every tick the
+    // platform is drawn interpolating from wherever it started, which reads as
+    // flicker and makes riders appear to outrun it.
+    this.prevX = this.x
+    this.prevY = this.y
+
     this.deltaX = 0
     this.deltaY = 0
     if (!this.moving) return
 
-    this.tickCounter++
-    if (this.tickCounter < TICKS_PER_STEP) return
-    this.tickCounter = 0
-
-    this.step++
+    this.elapsed++
     const source = this.atEnd === 0 ? this.from : this.to
     const target = this.atEnd === 0 ? this.to : this.from
-    const t = Math.min(1, this.step / this.steps)
+    const t = Math.min(1, this.elapsed / this.duration)
 
-    const previousX = this.x
-    const previousY = this.y
     this.x = source.x + (target.x - source.x) * t
     this.y = source.y + (target.y - source.y) * t
-    this.deltaX = this.x - previousX
-    this.deltaY = this.y - previousY
+    this.deltaX = this.x - this.prevX
+    this.deltaY = this.y - this.prevY
 
     if (t >= 1) {
       this.moving = false
       this.atEnd = 1 - this.atEnd
-      this.step = 0
+      this.elapsed = 0
     }
   }
 }
