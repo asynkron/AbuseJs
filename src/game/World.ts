@@ -1,7 +1,7 @@
 import { Container, Graphics, type Renderer } from 'pixi.js'
 
 import type { GameAssets } from '../assets/loader'
-import type { LevelObjectData } from '../assets/types'
+import type { LevelObjectData, RenderLight } from '../assets/types'
 import type { AudioBank } from '../audio/AudioBank'
 import { AmbientSounds } from '../audio/AmbientSounds'
 import { Camera } from '../core/camera'
@@ -12,7 +12,7 @@ import { StatusBar } from '../render/StatusBar'
 import { TileLayer } from '../render/TileLayer'
 import { PlayerCombatant, PropCombatant, type Combatant } from './combat'
 import { isBlocked, isGrounded, moveAndCollide, type Body } from './collision'
-import { EffectsSystem, gibFlavourFor, hurtRadius, type BlastSource } from './effects/index'
+import { bloodFor, EffectsSystem, gibFlavourFor, hurtRadius, type BlastSource } from './effects/index'
 import { speed } from './enemies/tuning'
 import { buildEnemies, type EnemyGroup, type EnemyShot, type EnemySound } from './enemies/index'
 import { buildForceFields, type ForceField } from './ForceField'
@@ -106,6 +106,13 @@ const CHEST_HEIGHT = 16
  * take a boolean, so somewhere on that ramp is a threshold. Invented: half.
  */
 const SNEAKY_THRESHOLD = 0.5
+
+/**
+ * Damage below this draws no blood. Invented, and set so a machine gun round
+ * (5) just clears it while the splash off a neighbouring hidden wall mostly
+ * does not.
+ */
+const HIT_SPRAY_MIN_DAMAGE = 5
 
 /** The lisp's 0..127 volume scale, which AudioBank works in 0..1. */
 const FULL_VOLUME = 127
@@ -234,6 +241,9 @@ export class World {
   /** The original status bar, in screen space. */
   readonly statusBar: StatusBar
 
+  /** Reused each frame; see the merge in `render`. */
+  private readonly dynamicLights: RenderLight[] = []
+
   /** Where the crosshair is in world space; the disc and the death ray steer by it. */
   private pointer: { x: number; y: number } | null = null
 
@@ -266,11 +276,15 @@ export class World {
       targets: () => this.combatants,
     })
 
-    this.projectiles = new ProjectileSystem(assets, this.projectileHost(), this.fx.particles)
+    this.projectiles = new ProjectileSystem(assets, this.projectileHost(), this.fx.bursts)
 
     this.backdrop.addChild(this.bgTiles.container)
     this.scene.addChild(
       this.fgTiles.container,
+      // Blood marks go over the floor and under everything standing on it,
+      // which is the one place the effects subsystem cannot put its own
+      // sprites - see the note on EffectsSystem.decals.
+      this.fx.decals,
       this.propLayer,
       this.entityLayer,
       this.projectiles.container,
@@ -456,19 +470,19 @@ export class World {
       level: this.level,
       targets: () => this.combatants,
       // Everything in `combatants` is a Combatant, so this is the same object
-      // coming back. A direct hit carries no `from`: the host's damage call
-      // has no room for one, so a weapon kill always produces the plain gibs
-      // rather than the flaming or electric set `get_dead_part` would pick.
-      damage: (target, amount, pushX, pushY) => {
+      // coming back. The `from` is the projectile's own character name, which
+      // is what `get_dead_part` reads to decide whether a corpse comes apart
+      // flaming, electric or plain (lisp/ant.lsp).
+      damage: (target, amount, pushX, pushY, from) => {
         const combatant = target as Combatant
-        combatant.hurt(amount, null, pushX, pushY)
+        combatant.hurt(amount, from ?? null, pushX, pushY)
       },
-      hurtRadius: (x, y, radius, amount, exclude, maxPush) => {
-        hurtRadius(this.blastTargets(exclude), x, y, radius, amount, null, maxPush)
+      hurtRadius: (x, y, radius, amount, exclude, maxPush, from) => {
+        hurtRadius(this.blastTargets(exclude), x, y, radius, amount, from ?? null, maxPush)
       },
       playSound: (name, x, y) => this.audio.playNamed(name, { volume: 0.6, x, y }),
       pointer: () => this.pointer,
-      addLight: (x, y, outer) => this.fx.flash(x, y, outer),
+      addLight: (x, y, outer, options) => this.fx.flash(x, y, outer, options),
     }
   }
 
@@ -600,6 +614,16 @@ export class World {
     // SWITCH_BALL latches on the first hit; nothing else in the logic cares.
     if (prop.objectIndex >= 0) this.logic.reportDamage(prop.objectIndex)
 
+    // Invented. A hit that does not kill still opens something up, and without
+    // this blood only ever appears at the instant of death, which reads as a
+    // death animation rather than as a property of the creature. The threshold
+    // stops a hidden wall's chain-reaction splash becoming a fountain.
+    const bleeds = bloodFor(prop.character)
+    if (bleeds && amount >= HIT_SPRAY_MIN_DAMAGE) {
+      const wound = prop.hitBox
+      this.fx.blood.spit(prop.x, (wound.top + wound.bottom) / 2, bleeds, amount)
+    }
+
     if (!prop.damage(amount, from?.type)) return
     this.kills++
     this.deathEffect(prop, from)
@@ -627,7 +651,13 @@ export class World {
 
     if (BIG_WALLS.test(character)) return explosions.bigWallBlast(x, y, from)
     if (SMALL_WALLS.test(character)) return explosions.hiddenWallBlast(x, y, prop.direction, from)
-    if (FLYERS.has(character)) return explosions.flyerDeath(x, middle)
+    if (FLYERS.has(character)) {
+      // A flyer burns and bleeds. WHO is in this set and is not on the blood
+      // roster - it is a robot that borrows `flyer_ai` - so this comes to
+      // nothing for it.
+      this.fx.blood.burst(x, middle, bloodFor(character))
+      return explosions.flyerDeath(x, middle)
+    }
 
     switch (character) {
       case 'SPRAY_GUN':
@@ -642,7 +672,15 @@ export class World {
         // No explosion at all: an ant comes apart into five body parts and
         // that is the whole of it. The tint index is the ant's own aitype,
         // which is what `ant_draw` colours the live one by.
-        return gibs.createDeadParts(x, y, prop.direction, 'ant', gibFlavourFor(from), prop.data.aitype)
+        return gibs.createDeadParts(
+          x,
+          y,
+          prop.direction,
+          'ant',
+          gibFlavourFor(from),
+          prop.data.aitype,
+          bloodFor(character),
+        )
 
       case 'BOSS_ANT':
         // The boss reports a kill on the hit that takes its last form, but it
@@ -1168,11 +1206,23 @@ export class World {
     this.scene.position.set(-Math.round(camera.x), -Math.round(camera.y))
 
     // Renders to its own target, so it has to happen before the main pass.
+    //
+    // The dynamic half is two lists - the explosion flashes and whatever the
+    // projectiles are throwing this frame - merged into one array that is
+    // reused rather than rebuilt, because with a weapon held down this is
+    // every frame rather than only the frames something goes off.
     const { minLight, lights } = this.level.lighting
-    // `hasLights` is false on almost every frame, so the merge costs nothing
-    // until something actually goes off.
-    const all = this.fx.hasLights ? [...lights, ...this.fx.lights] : lights
-    this.lights.update(renderer, all, minLight, camera.x, camera.y, this.zoom)
+    this.dynamicLights.length = 0
+    this.dynamicLights.push(...this.fx.lights, ...this.projectiles.lights)
+    this.lights.update(
+      renderer,
+      lights,
+      this.dynamicLights,
+      minLight,
+      camera.x,
+      camera.y,
+      this.zoom,
+    )
 
     this.messages.layout(viewW, viewH, this.zoom)
     this.statusBar.setHealth(this.player.health)
@@ -1247,6 +1297,10 @@ export class World {
       `${shots ? ` ${shots} shots` : ''}` +
       `${this.fx.particles.liveCount ? ` ${this.fx.particles.liveCount} puffs` : ''}` +
       `${this.fx.gibs.liveCount ? ` ${this.fx.gibs.liveCount} gibs` : ''}` +
+      `${this.fx.motes.liveCount ? ` ${this.fx.motes.liveCount} motes` : ''}` +
+      `${this.fx.blood.dropletCount ? ` ${this.fx.blood.dropletCount} blood` : ''}` +
+      `${this.fx.blood.decalCount ? ` ${this.fx.blood.decalCount} marks` : ''}` +
+      `${this.dynamicLights.length ? ` ${this.dynamicLights.length} lights` : ''}` +
       ` ${this.enemies.members.length} live` +
       ` logic ${this.logic.counts.on}/${this.logic.counts.objects}` +
       `${this.kills ? ` kills ${this.kills}` : ''}`
@@ -1255,6 +1309,19 @@ export class World {
 
   get ambientCount(): number {
     return this.ambience.count
+  }
+
+  /**
+   * The gore switch. Off clears what is already down as well as stopping any
+   * more - a half-cleaned room reads worse than either state.
+   */
+  get gore(): boolean {
+    return this.fx.blood.enabled
+  }
+
+  set gore(on: boolean) {
+    this.fx.blood.enabled = on
+    if (!on) this.fx.blood.clear()
   }
 
   /**

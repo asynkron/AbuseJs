@@ -1,4 +1,6 @@
+import { applyBlastGlow } from './blastGlow'
 import type { ExplosionLights } from './lights'
+import type { MoteSink } from './motes'
 import type { Particles } from './Particles'
 import { hurtRadius } from './hurtRadius'
 import { random } from './random'
@@ -16,6 +18,18 @@ import { volume, type BlastSource, type Hurtable, type SoundPlayer } from './typ
  *
  * Every method takes a world position and does the whole thing - sprites,
  * light, sound and damage - so a caller is one line.
+ *
+ * `do_explo`, `do_white_explo`, `do_small_explo` and the projectile impacts
+ * used to live here as well, and are gone: weapons/blasts.ts has its own copy
+ * of each, those are the ones with callers, and the two are not
+ * interchangeable. The copy here took a `from` and spent it on `hurt_radius`'s
+ * *credit* argument; the weapons' copy takes an owner and spends it on the
+ * *exclude* argument, which is what stops a grenade killing the hand that
+ * threw it. Only `smallCluster` stayed, because the deaths below share it.
+ *
+ * The light and the particles over each of these come from `applyBlastGlow`,
+ * one line per site. The original lights four of them and leaves the rest
+ * dark - a JUGGER dies with nothing but a sound.
  */
 export class Explosions {
   /**
@@ -30,38 +44,12 @@ export class Explosions {
   constructor(
     private readonly puffs: Particles,
     private readonly lights: ExplosionLights,
+    private readonly motes: MoteSink,
     private readonly audio: SoundPlayer,
     private readonly targets: () => Iterable<Hurtable>,
   ) {}
 
   // ---------------------------------------------------------------- generic
-
-  /**
-   * `do_explo` (lisp/explo.lsp): two orange fireballs staggered by two ticks,
-   * a 100px light and a damage sphere. Grenades use 40/36, rockets 40/50, the
-   * air mine 40/25, bombs 40 over their jump_yvel.
-   */
-  doExplo(x: number, y: number, radius: number, amount: number, from: BlastSource | null): void {
-    this.audio.playNamed('GRENADE_SND', { volume: volume(127), x, y })
-    this.puffs.spawn('EXPLODE1', x + random(10), y + random(10) - 20, 0)
-    if (!this.framePanic) {
-      this.puffs.spawn('EXPLODE1', x - random(10), y - random(10) - 20, 2)
-      this.lights.add(x, y)
-    }
-    hurtRadius(this.targets(), x, y, radius, amount, from, 20)
-  }
-
-  /**
-   * `do_white_explo` (lisp/explo.lsp): the same shape with one white blast in
-   * place of the two orange ones, and no second sprite at all. Only the disc
-   * frisbee uses it, at 40/45 - the only use of EXPLODE8 in the game.
-   */
-  doWhiteExplo(x: number, y: number, radius: number, amount: number, from: BlastSource | null): void {
-    this.audio.playNamed('GRENADE_SND', { volume: volume(127), x, y })
-    this.puffs.spawn('EXPLODE8', x + random(10), y + random(10) - 20, 0)
-    if (!this.framePanic) this.lights.add(x, y)
-    hurtRadius(this.targets(), x, y, radius, amount, from, 20)
-  }
 
   /**
    * The four-sprite debris cluster: three EXPLODE3 and one EXPLODE2 inside a
@@ -77,60 +65,7 @@ export class Explosions {
     this.puffs.spawn('EXPLODE2', x + random(5), y + random(5), 2)
     this.puffs.spawn('EXPLODE3', x - random(5), y - random(5), 1)
     this.puffs.spawn('EXPLODE3', x - random(5), y - random(5), 2)
-  }
-
-  /** `do_small_explo` in full - the cluster plus its damage sphere. Unused by the original. */
-  doSmallExplo(x: number, y: number, radius: number, amount: number, from: BlastSource | null): void {
-    this.smallCluster(x, y)
-    hurtRadius(this.targets(), x, y, radius, amount, from, 20)
-  }
-
-  // ------------------------------------------------------------- projectiles
-
-  /**
-   * The firebomb, every tick of its twenty: one fireball low and to the rear,
-   * and 40 damage over 60px to everything in range (lisp/weapons.lsp
-   * firebomb_ai). The bomb object itself is invisible - `fb_draw` returns nil
-   * - so this is the entire thing you see.
-   *
-   * Call it once per engine tick while the bomb lives; it is the most damaging
-   * thing in the game by a wide margin, and that is not an accident of the
-   * port.
-   */
-  firebombTick(x: number, y: number, from: BlastSource | null): void {
-    this.puffs.spawn('EXPLODE1', x - random(5), y + random(20), 0)
-    hurtRadius(this.targets(), x, y, 60, 40, from, 10)
-  }
-
-  /** Plasma gun hitting terrain: one b4 burst (lisp/guns.lsp fire_object case 4). */
-  plasmaTerrainImpact(x: number, y: number): void {
-    this.puffs.spawn('EXPLODE5', x - random(5), y - random(5), 0)
-  }
-
-  /** Plasma gun hitting something alive. The 10 damage is the caller's to apply. */
-  plasmaObjectImpact(x: number, y: number): void {
-    this.puffs.spawn('EXPLODE3', x - random(5), y - random(5), 0)
-  }
-
-  /**
-   * The enemy rocket hitting a wall: EG_EXPLO's four-frame flash
-   * (lisp/ant.lsp strait_rocket_ai). No sound.
-   *
-   * EG_EXPLO also declares a `blocking` state, which is unreachable - its only
-   * caller passes nil block_flags. A latent bug in the original, left alone.
-   */
-  enemyRocketTerrainImpact(x: number, y: number): void {
-    this.puffs.spawn('EG_EXPLO', x, y, 0)
-  }
-
-  /**
-   * The enemy rocket hitting something: the debris cluster, and a small blast
-   * twenty pixels *below* the impact - 25px for 15, credited to nobody, and no
-   * sound on this path (lisp/ant.lsp strait_rocket_ai).
-   */
-  enemyRocketObjectImpact(x: number, y: number): void {
-    this.smallCluster(x, y)
-    hurtRadius(this.targets(), x, y + 20, 25, 15, null, 10)
+    applyBlastGlow(this.lights, this.motes, x, y, 'small')
   }
 
   // ------------------------------------------------------------------ walls
@@ -145,6 +80,7 @@ export class Explosions {
   hiddenWallBlast(x: number, y: number, direction: number, from: BlastSource | null): void {
     this.puffs.spawn('EXPLODE1', x + 15, y - 7, 0)
     this.audio.playNamed('HWALL_SND', { volume: volume(127), x, y })
+    applyBlastGlow(this.lights, this.motes, x + 15, y - 7, 'medium')
     hurtRadius(this.targets(), x + 15 * direction, y - 7, 50, 60, from, 20)
   }
 
@@ -158,6 +94,12 @@ export class Explosions {
     this.puffs.spawn('EXPLODE1', x + 15, y - 22, 0)
     this.puffs.spawn('EXPLODE1', x + random(5), y + random(5) - 20, 0)
     this.audio.playNamed('HWALL_SND', { volume: volume(127), x, y })
+    // The biggest thing in the game short of the boss: 120 damage over 110px,
+    // and what comes off a wall is wall, so the debris is grey and it bounces.
+    applyBlastGlow(this.lights, this.motes, x, y - 15, 'huge', {
+      debrisColour: 0x6f6a60,
+      debrisCollides: true,
+    })
     hurtRadius(this.targets(), x, y - 15, 110, 120, from, 20)
   }
 
@@ -186,6 +128,15 @@ export class Explosions {
     this.puffs.spawn('EXPLODE1', hitX + random(10), hitY + random(25), 1)
     this.puffs.spawn('EXPLODE1', hitX - random(10), hitY - random(10), 2)
     this.puffs.spawn('EXPLODE1', hitX + random(10), hitY + random(10), 3)
+    // Two flashes rather than one, staged on the same beat as the sprites, so
+    // the light comes apart with the machine instead of firing once at the
+    // front of it. A turret sparks more than it burns, hence the metal debris
+    // and the thinned embers.
+    applyBlastGlow(this.lights, this.motes, hitX, hitY, 'large', {
+      embers: 0.6,
+      debrisColour: 0x8090a0,
+    })
+    applyBlastGlow(this.lights, null, hitX, hitY, 'small', { delay: 2 })
   }
 
   /**
@@ -200,6 +151,13 @@ export class Explosions {
   /** The killing hit on JUGGER or ROB1 (lisp/jugger.lsp explo_damage). */
   robotBlownUp(x: number, y: number): void {
     this.audio.playNamed('BLOWN_UP', { volume: volume(127), x, y })
+    // For ROB1 this is the opening of an eight-fireball sequence, but for
+    // JUGGER it is the entire death - the original plays the sound and draws
+    // nothing whatsoever, so one of the five biggest things on the level dies
+    // invisibly in a dark room.
+    applyBlastGlow(this.lights, this.motes, x, y - 20, 'large', {
+      debrisColour: 0x8090a0,
+    })
   }
 
   /**
@@ -217,6 +175,11 @@ export class Explosions {
     this.puffs.spawn('EXPLODE1', x - 25, y - 30, 2)
     this.puffs.spawn('EXPLODE1', x + 20, y - 5, 4)
     this.puffs.spawn('EXPLODE1', x - 3, y - 1, 5)
+    // No base flash: `robotBlownUp` fires one at the same instant and the two
+    // callers run back to back. These are the secondaries, timed to the middle
+    // and the end of the eight sprites.
+    applyBlastGlow(this.lights, this.motes, x, y - 15, 'small', { delay: 2 })
+    applyBlastGlow(this.lights, this.motes, x, y - 15, 'small', { delay: 4 })
   }
 
   /**
@@ -227,6 +190,9 @@ export class Explosions {
     this.puffs.spawn('EXPLODE1', x + random(10), y + random(10) - 20, 0)
     this.puffs.spawn('EXPLODE1', x - random(10), y - random(10) - 20, 2)
     this.puffs.spawn('EXPLODE1', x, y - random(20) - 20, 4)
+    // Extra smoke: a flyer has been trailing SMALL_DARK_CLOUD the whole way
+    // down, so it is already burning when it comes apart.
+    applyBlastGlow(this.lights, this.motes, x, y - 20, 'medium', { smoke: 2 })
   }
 
   // --------------------------------------------------------------- boulders
@@ -237,6 +203,11 @@ export class Explosions {
    */
   boulderChip(x: number, y: number): void {
     this.puffs.spawn('EXPLODE3', x + 10 - random(20), y - random(30), 0)
+    applyBlastGlow(this.lights, this.motes, x, y - 15, 'chip', {
+      tint: 0xffffff,
+      embers: 0,
+      debrisColour: 0x707068,
+    })
   }
 
   /**
@@ -251,7 +222,14 @@ export class Explosions {
     this.puffs.spawn('EXPLODE1', x + random(5), y + random(5), 2)
     this.puffs.spawn('EXPLODE1', x - random(5), y - random(5), 1)
     this.puffs.spawn('EXPLODE1', x - random(5), y - random(5), 2)
-    this.lights.add(x, y)
+    // Rock does not burn: no embers at all, plenty of grey chunks, and a plain
+    // white flash rather than the fire tint.
+    applyBlastGlow(this.lights, this.motes, x, y, 'large', {
+      tint: 0xffffff,
+      embers: 0,
+      debrisColour: 0x707068,
+      debrisCollides: true,
+    })
   }
 
   /**
@@ -262,6 +240,11 @@ export class Explosions {
     this.puffs.spawn('EXPLODE1', x + random(10), y + random(5) - 10, 0)
     this.puffs.spawn('EXPLODE1', x - random(10), y - random(5) - 10, 2)
     this.audio.playNamed('P_EXPLODE_SND', { volume: volume(127), x, y })
+    applyBlastGlow(this.lights, this.motes, x, y - 10, 'small', {
+      tint: 0xffffff,
+      embers: 0,
+      debrisColour: 0x707068,
+    })
     hurtRadius(this.targets(), x, y, 40, 15, from, 20)
   }
 
@@ -280,6 +263,13 @@ export class Explosions {
     if (stateTime % 8 === 0) this.audio.playNamed('GRENADE_SND', { volume: volume(127), x, y })
     this.puffs.spawn('EXPLODE1', x + random(stateTime * 2), y + random(stateTime), 0)
     this.puffs.spawn('EXPLODE1', x - random(stateTime * 2), y - random(stateTime), 0)
+    // Every fourth tick, not every tick: sixty overlapping flashes is a flat
+    // white screen. The embers scale with the timer the way the scatter does.
+    if (stateTime % 4 === 0) {
+      applyBlastGlow(this.lights, this.motes, x, y, 'small', {
+        embers: 1 + stateTime / 20,
+      })
+    }
   }
 
   // ----------------------------------------------------------- environmental

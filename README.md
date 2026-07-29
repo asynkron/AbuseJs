@@ -345,6 +345,47 @@ One approximation: `inner_radius` is treated as 0, so a single normalised fallof
 every light. It is 1 for 5152 of the 5617 lights (a ~1% error) and 10 for 49 of them. Type 9 — a
 solid rectangle that overrides everything beneath it — occurs 3 times in 125 levels and is skipped.
 
+## Effects the original does not have
+
+Everything in this section is an addition. It is kept behind the same art the original draws — the
+`def_explo` fireballs and the 24 tumbling gib sprites are untouched underneath — and the point of
+all of it is that Abuse's own effects are a fixed sprite sequence and one on/off light, so a killed
+ant pops into five cardboard cutouts with nothing covering the swap and a JUGGER dies with no
+visual at all, only a sound.
+
+One rule runs through the lot: **it has to read as pixel art.** Integer positions, integer sizes,
+nearest sampling, 1-bit alpha in every generated mask, and colour ramps quantised to six steps.
+The scene is nearest-neighbour art at an integer zoom under a CRT filter, and a single soft-edged
+gaussian in the middle of it announces itself as belonging to a different decade.
+
+- **Blood** (`src/game/effects/Blood.ts`, `gore.ts`, `bloodArt.ts`). There is no blood anywhere in
+  Abuse. Creatures that bleed — the ants, `ANT_CRACK`, the boss, the two flyers — throw a burst of
+  droplets as they come apart, each body part trails while it tumbles, and each one leaves a mark
+  where it lands. Non-fatal hits spit a few. Marks are a 256-entry ring that darkens through three
+  drying steps and never fades out. Droplets run on the 60 Hz tick rather than the effects
+  subsystem's 15 Hz, because at 15 Hz a spray reads as a dashed line. Red for everything with a
+  pulse, aliens included; `tint_palette`'s red damage ramp is not implemented, so there is nothing
+  for it to clash with. **G** turns the whole thing off.
+- **Moving particles** (`motes.ts`). Fire, smoke, embers and debris, with velocity, gravity, drag
+  and a colour ramp. Pooled sprites over one 2×2 white texture, capped at 600 with oldest-first
+  eviction. `Particles.ts` next door is the real article — `exp_ai`, a one-shot animation that
+  never moves — and stays as it is.
+- **Explosion light and particles** (`blastGlow.ts`). One table of five sizes, one line per blast
+  site. The `medium` row is `EXP_LIGHT`'s own radius and `explo_light`'s own count, so the ordinary
+  `do_explo` still lights the room exactly as far as the original does; every other row is scaled
+  from it. Deliberately no shockwave ring — an expanding circle is not in Abuse's visual language.
+- **Weapon light** (`weapons/glow.ts`). Muzzle flashes, a light travelling with anything in flight,
+  and point lights strung along the plasma and sabre beams so they light the corridor they cross
+  rather than only the wall they end at. Rebuilt from the live projectiles every frame rather than
+  registered as timed flashes: a rocket covers 14px a tick and a flash placed at its position is
+  56px behind it by the next effects tick. Capped at 40 lights a frame.
+- **Rocket exhaust** (`weapons/exhaust.ts`). A jet of flame at the nozzle and smoke that drifts and
+  expands, over the original's one `SMALL_LIGHT_CLOUD` per tick.
+
+`ExplosionLights` grew a decay, a tint, a hold and a spawn delay to carry this, and counts its
+lifetimes in sim ticks so the falloff has 20 steps rather than 5. Its defaults still reproduce
+`explo_light` exactly.
+
 ## Music
 
 `tools/hmi.ts` converts the 14 HMI tracks to standard MIDI, ported from
@@ -384,17 +425,13 @@ here obeys the mute gate — a muted page loads no music at all.
   characters. Their catalogues are spelled out by hand in `src/game/effects/sprites.ts` and
   `DeathEffects.ts` against frames that are all present in the atlas. Teaching the extractor to
   expand the form would let both tables be deleted.
-- **A weapon kill does not colour its gibs.** `get_dead_part` picks flaming or electric parts from
-  the otype of the killing shot, but the projectile host's damage call has no room for a source, so
-  everything a weapon kills comes apart into the plain set. Blasts that go through the effects
-  subsystem directly — the hidden walls — do carry it.
 - **Enemies do not come back.** Kill one and the level is that much emptier until you reload it;
   there is no respawn logic beyond `ANT_CRACK`.
 - **The full-screen tints are missing.** `tint_palette` and `make_view_solid` — the red damage ramp,
   the mine's flash, POWER_FAST's white flash — are present-pass effects and belong in the CRT
   filter. SNEAKY's "predator" refraction is drawn as a very low alpha for the same reason.
 - **Thirteen level-logic behaviours are still out.** Bombs, mines, lava, teleport pads, TP_DOORs,
-  ladders, springs, pushers, lightning, dimmers, movers, holders and `DEATH_RESPAWNER` have no
+  ladders, pushers, lightning, dimmers, movers, holders and `DEATH_RESPAWNER` have no
   implementation; the seventeen switch/gate/door/lift types do.
 - **18 addon levels reference tiles that were never shipped** — mostly `addon/claudio/*` and
   `addon/pong/*`, plus a dozen stray cells in `levels/frabs18` and `levels/frabs30`. `abuse.lsp`

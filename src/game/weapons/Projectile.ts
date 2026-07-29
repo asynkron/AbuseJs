@@ -152,6 +152,28 @@ export const PROJECTILE_CHARACTER: Readonly<Record<ProjectileKind, string | null
   deathRay: 'DEATH_RAY',
 }
 
+/**
+ * What each kind is called when it is credited with a kill.
+ *
+ * `get_dead_part` (lisp/ant.lsp) picks the flavour of body part from the otype
+ * of whatever landed the killing shot, so a corpse only comes apart flaming or
+ * electric if this reaches it. It is not the same list as
+ * `PROJECTILE_CHARACTER` above: plasma and the sabre draw no sprite at all and
+ * so have no draw character, but they are exactly the two the enum calls
+ * electric.
+ */
+export const PROJECTILE_BLAST_SOURCE: Readonly<Record<ProjectileKind, string>> = {
+  machineGun: 'SHOTGUN_BULLET',
+  grenade: 'GRENADE',
+  rocket: 'ROCKET',
+  plasma: 'PLASMAGUN_BULLET',
+  firebomb: 'FIREBOMB',
+  disc: 'DFRIS_BULLET',
+  lightSabre: 'LSABER_BULLET',
+  straitRocket: 'STRAIT_ROCKET',
+  deathRay: 'DEATH_RAY',
+}
+
 /** Shared starting point for every kind. */
 export function motion(
   x: number,

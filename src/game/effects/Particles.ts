@@ -26,8 +26,16 @@ import { placeAnchored, placeMiddle, puffFrames, puffIsAnchored, type PuffKind }
  * frames before appearing".
  */
 
-/** Sprites kept for reuse. A firebomb alone lays down twenty of these. */
-const POOL_LIMIT = 64
+/**
+ * Sprites kept for reuse. A firebomb alone lays down twenty of these.
+ *
+ * Raised from 64 because a rocket trail spawns once per *sim* tick where the
+ * original spawns once per engine tick. The spacing on screen is identical -
+ * the rocket also covers four times the ground per second - but four times as
+ * many puffs are alive at once, and two rockets in the air used to empty the
+ * pool.
+ */
+const POOL_LIMIT = 96
 
 /**
  * `set_fade_count` runs 0 (opaque) to 15 (invisible). Smoke trails are spawned
@@ -86,25 +94,6 @@ export class Particles {
       frame: 0,
       alpha: Math.max(0, 1 - fade / MAX_FADE),
     })
-  }
-
-  /**
-   * The rocket's smoke: one translucent puff every tick, offset up into the
-   * body of the missile (lisp/weapons.lsp rocket_ai). `spriteHeight` is the
-   * rocket's own `picture_height`.
-   */
-  rocketTrail(x: number, y: number, spriteHeight: number): void {
-    if (!this.clock.stepped) return
-    this.spawn('SMALL_LIGHT_CLOUD', x + random(3), y - random(3) - spriteHeight / 2, 0, 11)
-  }
-
-  /**
-   * The disc frisbee lays the same trail at half the density - `(eq 0 (mod
-   * (game_tick) 2))` (lisp/weapons.lsp dfris_ai).
-   */
-  discTrail(x: number, y: number, spriteHeight: number): void {
-    if (!this.clock.stepped || this.clock.ticks % 2 !== 0) return
-    this.spawn('SMALL_LIGHT_CLOUD', x + random(3), y - random(3) - spriteHeight / 2, 0, 11)
   }
 
   /**

@@ -210,6 +210,23 @@ async function start() {
   let viewWidth = Math.ceil(app.renderer.screen.width / zoom)
   let viewHeight = Math.ceil(app.renderer.screen.height / zoom)
 
+  /**
+   * The gore switch, on its own key rather than in the picture settings: those
+   * are written back from the slider panel's own sync, and hanging a keyboard
+   * toggle off that save path is the wrong coupling.
+   */
+  const GORE_KEY = 'abusejs.gore'
+  let gore = localStorage.getItem(GORE_KEY) !== 'off'
+  const setGore = (on: boolean): void => {
+    gore = on
+    world.gore = on
+    try {
+      localStorage.setItem(GORE_KEY, on ? 'on' : 'off')
+    } catch {
+      // Private browsing. The toggle still works for this session.
+    }
+  }
+
   let currentLevelId = levelId
   let level!: Level
   let world!: World
@@ -238,6 +255,9 @@ async function start() {
     // Messages go above the lighting - a tutorial line should not be in shadow.
     app.stage.addChild(world.root, world.lights.overlay, world.statusBar.container, world.messages.container)
     world.resize(viewWidth, viewHeight, zoom)
+    // A fresh World defaults to gore on, so the preference has to be pushed
+    // back in on every level.
+    world.gore = gore
     // Deliberately not written back to the URL. Doing so left `#levels/level01`
     // in the address bar, which the next visit read as a deep link and used to
     // skip the title screen - so the menu appeared exactly once, ever. The hash
@@ -311,6 +331,7 @@ async function start() {
   window.addEventListener('keydown', (e) => {
     if (e.code === 'KeyV') setCrtEnabled(!crtEnabled)
     else if (e.code === 'KeyL') world.lights.enabled = !world.lights.enabled
+    else if (e.code === 'KeyG') setGore(!gore)
   })
 
   let frames = 0
@@ -367,7 +388,8 @@ async function start() {
         `${world.savedMessage > 0 ? '   *** GAME SAVED ***' : ''}` +
         `   [${world.player.weaponSlot.name}` +
         `${world.powerLabel ? `  ${world.powerLabel.toUpperCase()}${world.powerActive ? '*' : ''}` : ''}]` +
-            `   V crt:${crtEnabled ? 'on' : 'off'}   L light:${world.lights.enabled ? 'on' : 'off'}`,
+            `   V crt:${crtEnabled ? 'on' : 'off'}   L light:${world.lights.enabled ? 'on' : 'off'}` +
+            `   G gore:${gore ? 'on' : 'off'}`,
         ].join('\n')
       }
     },

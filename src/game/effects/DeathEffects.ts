@@ -1,8 +1,10 @@
 import { Container, Sprite } from 'pixi.js'
 
 import type { Frame, GameAssets } from '../../assets/loader'
+import type { Blood } from './Blood'
 import { bounceMove, type MovingBox } from './bounce'
 import type { TickClock } from './clock'
+import type { BloodProfile } from './gore'
 import { random } from './random'
 import { placeAnchored, sequenceFrameName } from './sprites'
 import type { BlastSource, Terrain } from './types'
@@ -19,6 +21,14 @@ import type { BlastSource, Terrain } from './types'
  * There is no blood anywhere in Abuse. The red on screen when you are hit is
  * `tint_palette`, a full-screen ramp the player's damage handler drives, and
  * it belongs with the player rather than here.
+ *
+ * That is still true of the original, and this file now breaks it on purpose.
+ * The parts themselves are untouched - same art, same five actors, same
+ * unsynced tumble - but a creature that bleeds gets a burst as it comes apart,
+ * a dotted trail off each part while it flies, and a mark where each one
+ * lands. All three are inventions; see Blood.ts. The point of the first is
+ * that the frame where the body is replaced by five cutouts is the ugliest one
+ * in the game, and something has to be in front of it.
  */
 
 /** Which set of art a corpse comes apart into. */
@@ -108,7 +118,21 @@ interface Gib extends MovingBox {
   ticks: number
   /** Set on the tick it hits the floor; head_ai's aistate 1 returns nil the tick after. */
   landed: boolean
+  /** What this part bleeds, cleared once it has left its mark. Invented. */
+  bleed: BloodProfile | null
+  /** Engine ticks of trail left in it. Invented. */
+  trail: number
 }
+
+/**
+ * Engine ticks a part keeps bleeding after it is thrown.
+ *
+ * Invented. Eight, not the part's whole life: a gib still pumping four seconds
+ * into a fall reads as a leak rather than a wound, and the trail is there to
+ * give the eye something to follow through the tumble, which it has stopped
+ * needing by then.
+ */
+const GIB_TRAIL_TICKS = 8
 
 /** Sprites kept for reuse. Five per corpse, and corpses come in batches. */
 const POOL_LIMIT = 40
@@ -124,6 +148,7 @@ export class DeathEffects {
     private readonly assets: GameAssets,
     private readonly terrain: Terrain,
     private readonly clock: TickClock,
+    private readonly blood: Blood,
   ) {}
 
   /**
@@ -141,15 +166,20 @@ export class DeathEffects {
     set: GibSet,
     flavour: GibFlavour,
     tintIndex = 0,
+    bleed: BloodProfile | null = null,
   ): void {
+    // Before the parts, not after: the burst has to be on screen on the same
+    // frame the body disappears.
+    this.blood.burst(x, y - GIB_HEIGHT, bleed)
+
     const bases = GIB_ART[set].bases[flavour]
     // Two distinct parts, then the third three times, each started a frame
     // further into its tumble.
-    this.spawnPart(x, y, direction, set, bases[0], tintIndex, 0)
-    this.spawnPart(x, y, direction, set, bases[1], tintIndex, 0)
-    this.spawnPart(x, y, direction, set, bases[2], tintIndex, 1)
-    this.spawnPart(x, y, direction, set, bases[2], tintIndex, 2)
-    this.spawnPart(x, y, direction, set, bases[2], tintIndex, 3)
+    this.spawnPart(x, y, direction, set, bases[0], tintIndex, 0, bleed)
+    this.spawnPart(x, y, direction, set, bases[1], tintIndex, 0, bleed)
+    this.spawnPart(x, y, direction, set, bases[2], tintIndex, 1, bleed)
+    this.spawnPart(x, y, direction, set, bases[2], tintIndex, 2, bleed)
+    this.spawnPart(x, y, direction, set, bases[2], tintIndex, 3, bleed)
   }
 
   /** One engine tick of falling, tumbling and landing - `head_ai` (lisp/ant.lsp). */
@@ -169,10 +199,24 @@ export class DeathEffects {
       gib.frame = (gib.frame + 1) % gib.frames.length
       gib.vy += GIB_GRAVITY
 
+      if (gib.bleed && gib.trail > 0) {
+        gib.trail--
+        this.blood.trail(gib.x, gib.y - GIB_HEIGHT / 2, gib.vx, gib.vy, gib.bleed)
+      }
+
       const blocked = bounceMove(this.terrain, gib)
       // Only the down stub does anything in the original; left, right and up
       // just bounce.
       if (blocked.down) gib.landed = true
+
+      // head_ai removes the part the tick after it lands, so without this a
+      // corpse leaves nothing behind at all. One mark per part, not one per
+      // bounce - hence clearing the profile.
+      if (gib.bleed && (blocked.down || blocked.up || blocked.left || blocked.right)) {
+        const surface = blocked.down ? 'floor' : blocked.up ? 'ceiling' : 'wall'
+        this.blood.splat(gib.x, gib.y, surface, gib.bleed)
+        gib.bleed = null
+      }
 
       if (++gib.ticks >= MAX_GIB_TICKS) this.retire(i)
     }
@@ -211,6 +255,7 @@ export class DeathEffects {
     base: string,
     tintIndex: number,
     startFrame: number,
+    bleed: BloodProfile | null,
   ): void {
     const frames = this.framesFor(set, base, tintIndex)
     if (!frames.length) return
@@ -232,6 +277,8 @@ export class DeathEffects {
       vy: -random(25),
       ticks: 0,
       landed: false,
+      bleed,
+      trail: GIB_TRAIL_TICKS,
     })
   }
 

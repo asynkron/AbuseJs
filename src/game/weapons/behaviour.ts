@@ -20,7 +20,8 @@ import {
 } from './angles'
 import { bmove, findTargetInArea, moveUnderGravity } from './bmove'
 import type { MoveOutcome, ProjectileLevel, ProjectileTarget } from './bmove'
-import { doDeathRayExplo, doExplo, doWhiteExplo, frameSkip, quickLight } from './blasts'
+import { blastSource, doDeathRayExplo, doExplo, doWhiteExplo, frameSkip, quickLight } from './blasts'
+import { discExhaust, firebombFlames, rocketExhaust } from './exhaust'
 import type { BlastContext } from './blasts'
 import type {
   DeathRay,
@@ -103,6 +104,7 @@ function tickMachineGun(bullet: MachineGunBullet, ctx: TickContext): void {
     MGUN_DAMAGE,
     cosDeg(bullet.angle) * MGUN_PUSH,
     sinDeg(bullet.angle) * MGUN_PUSH,
+    blastSource(bullet),
   )
 }
 
@@ -168,8 +170,16 @@ function trailSmoke(projectile: { x: number; y: number }, kind: ProjectileKind, 
     'SMALL_LIGHT_CLOUD',
     projectile.x + randomBelow(3),
     projectile.y - randomBelow(3) - ctx.pictureHeight(kind) / 2,
+    0,
+    // `(set_fade_count 11)` - the puff is meant to be about a quarter opaque.
+    // The argument had nowhere to go until BurstSink grew one, so the trail
+    // has been drawing at full strength.
+    TRAIL_FADE,
   )
 }
+
+/** `(set_fade_count 11)` on the 0..15 scale - lisp/weapons.lsp rocket_ai. */
+const TRAIL_FADE = 11
 
 function liveTarget(target: ProjectileTarget | null): ProjectileTarget | null {
   if (!target || target.isDead || target.isDying) return null
@@ -178,6 +188,7 @@ function liveTarget(target: ProjectileTarget | null): ProjectileTarget | null {
 
 function tickRocket(rocket: Rocket, ctx: TickContext): void {
   trailSmoke(rocket, 'rocket', ctx)
+  if (!frameSkip(ctx.host)) rocketExhaust(ctx.bursts.motes, rocket)
 
   const target = liveTarget(rocket.target)
   rocket.target = target
@@ -234,6 +245,7 @@ function tickFirebomb(bomb: Firebomb, ctx: TickContext): void {
   // The flame comes first and unconditionally: a firebomb that dies this tick
   // still burns this tick.
   ctx.bursts.spawn('EXPLODE1', bomb.x - randomBelow(5), bomb.y + randomBelow(20))
+  if (!frameSkip(ctx.host)) firebombFlames(ctx.bursts.motes, bomb.x, bomb.y, ctx.gameTick)
   ctx.host.hurtRadius(
     bomb.x,
     bomb.y,
@@ -241,6 +253,7 @@ function tickFirebomb(bomb: Firebomb, ctx: TickContext): void {
     FIREBOMB_BLAST.damage,
     bomb.owner,
     FIREBOMB_BLAST.maxPush,
+    blastSource(bomb),
   )
 
   // `(move 0 0 0)` inside the blocked test is what actually advances it.
@@ -269,6 +282,7 @@ const DISC_AIM_OFFSET = 4
 function tickDisc(disc: Disc, ctx: TickContext): void {
   // Half the rocket's smoke rate.
   if (ctx.gameTick % 2 === 0) trailSmoke(disc, 'disc', ctx)
+  if (!frameSkip(ctx.host)) discExhaust(ctx.bursts.motes, disc)
 
   const course = setCourse(disc.heading, DISC_SPEED)
   disc.vx = course.vx
@@ -322,6 +336,10 @@ function tickSabre(slash: SabreSlash): void {
 const STRAIT_BLAST = { radius: 25, damage: 15, maxPush: 10 }
 
 function tickStraitRocket(rocket: StraitRocket, ctx: TickContext): void {
+  // Dimmer than the player's own rocket, but there: incoming fire has to be
+  // readable across a dark room.
+  if (!frameSkip(ctx.host)) rocketExhaust(ctx.bursts.motes, rocket, 0.6)
+
   const course = setCourse(rocket.heading, rocket.speed)
   rocket.vx = course.vx
   rocket.vy = course.vy
@@ -348,6 +366,7 @@ function tickStraitRocket(rocket: StraitRocket, ctx: TickContext): void {
     STRAIT_BLAST.damage,
     null,
     STRAIT_BLAST.maxPush,
+    blastSource(rocket),
   )
   rocket.alive = false
 }
@@ -375,6 +394,7 @@ function tickDeathRay(ray: DeathRay, ctx: TickContext): void {
     DEATH_RAY_AURA.damage,
     ray.owner,
     DEATH_RAY_AURA.maxPush,
+    blastSource(ray),
   )
 
   const course = setCourse(ray.heading, DEATH_RAY_SPEED)
@@ -432,7 +452,7 @@ function runTendril(ray: DeathRay, ctx: TickContext): void {
     target.y - (target.hitBox.bottom - target.hitBox.top) / 2 + 10 - randomBelow(20),
     1,
   )
-  ctx.host.hurtRadius(target.x, target.y, 1, TENDRIL.damage, ray.owner, TENDRIL.maxPush)
+  ctx.host.hurtRadius(target.x, target.y, 1, TENDRIL.damage, ray.owner, TENDRIL.maxPush, blastSource(ray))
 }
 
 /* ------------------------------------------------------------------ */

@@ -12,12 +12,14 @@
 import { Container, Graphics, Sprite } from 'pixi.js'
 
 import type { Frame, GameAssets } from '../../assets/loader'
+import type { RenderLight } from '../../assets/types'
 import { cosDeg, frameForAngle, normalizeAngle, randomBelow, setCourse, sinDeg, atan2Deg } from './angles'
 import { bmove, canSee, findTargetInArea } from './bmove'
 import type { MovingPoint, ProjectileLevel, ProjectileOwner, ProjectileTarget } from './bmove'
 import { tickProjectile } from './behaviour'
 import type { TickContext } from './behaviour'
 import type { BurstSink } from './blasts'
+import { MUZZLE, WeaponGlow } from './glow'
 import type { ProjectileHost } from './host'
 import { ascatterLine, drawLine, rgb, scatterLine } from './lines'
 import { PROJECTILE_TYPE, ROCKET_SEARCH_RADIUS, WEAPON_SLOTS } from './definitions'
@@ -118,6 +120,8 @@ export class ProjectileSystem {
   readonly container = new Container()
 
   private readonly beams = new Graphics()
+  /** This frame's dynamic lights, rebuilt in `draw`. See glow.ts. */
+  private readonly glow = new WeaponGlow()
   private readonly live: Projectile[] = []
   private readonly sprites = new Map<Projectile, Sprite>()
   private readonly spare: Sprite[] = []
@@ -252,6 +256,7 @@ export class ProjectileSystem {
     const heading = pointer ? atan2Deg(y - pointer.y - 4, pointer.x - owner.x) : 0
 
     this.host.playSound('DEATH_RAY_SND', owner.x, y)
+    this.muzzleFlash('deathRay', owner.x, y)
     this.add({
       kind: 'deathRay',
       ...motion(owner.x, y, owner, this.tick),
@@ -274,6 +279,7 @@ export class ProjectileSystem {
   ): void {
     const variant = BULLET_VARIANTS[type]
     this.host.playSound('ZAP_SND', x, y)
+    this.muzzleFlash('machineGun', x, y)
 
     // fire_object also does `(setq sgb_speed (+ sgb_speed (/ (xvel) 2)))`
     // inside the new bullet's own scope, so `(xvel)` is the bullet's own and
@@ -321,6 +327,7 @@ export class ProjectileSystem {
     target: ProjectileTarget | null,
   ): void {
     this.host.playSound('ROCKET_LAUNCH_SND', x, y)
+    this.muzzleFlash('rocket', x, y)
     // No lock through walls: the target is linked only if it can be seen.
     const locked = target && canSee(this.level, x, y, target.x, target.y) ? target : null
 
@@ -345,6 +352,7 @@ export class ProjectileSystem {
    */
   private spawnPlasma(x: number, y: number, angle: number, owner: ProjectileOwner | null): void {
     this.host.playSound('PLASMA_SND', x, y)
+    this.muzzleFlash('plasma', x, y)
     const impact = this.sweep(x, y, angle, PLASMA_RANGE, owner)
 
     if (impact.outcome.kind === 'wall') {
@@ -385,6 +393,7 @@ export class ProjectileSystem {
 
   private spawnDisc(x: number, y: number, angle: number, owner: ProjectileOwner | null): void {
     this.host.playSound('ROCKET_LAUNCH_SND', x, y)
+    this.muzzleFlash('disc', x, y)
     const course = setCourse(angle, DISC_LAUNCH_SPEED)
     const disc: Projectile = {
       kind: 'disc',
@@ -403,6 +412,7 @@ export class ProjectileSystem {
   /** 45px, 30 damage, and nothing at all happens on a wall hit. */
   private spawnSabre(x: number, y: number, angle: number, owner: ProjectileOwner | null): void {
     this.host.playSound('LSABER_SND', x, y)
+    this.muzzleFlash('lightSabre', x, y)
     const impact = this.sweep(x, y, angle, SABRE_RANGE, owner)
     if (impact.outcome.kind === 'object') {
       // Same stale sgb_angle as the plasma bolt; the fire angle is used.
@@ -425,6 +435,7 @@ export class ProjectileSystem {
     // Both sounds, back to back, as fire_object's arm 9 plays them.
     this.host.playSound('MGUN_SND', x, y)
     this.host.playSound('GRENADE_THROW', x, y)
+    this.muzzleFlash('straitRocket', x, y)
     this.add({
       kind: 'straitRocket',
       ...motion(x, y, owner, this.tick),
@@ -490,12 +501,39 @@ export class ProjectileSystem {
 
   draw(alpha: number): void {
     this.beams.clear()
+    this.glow.begin()
 
     for (const projectile of this.live) {
       const x = projectile.prevX + (projectile.x - projectile.prevX) * alpha
       const y = projectile.prevY + (projectile.y - projectile.prevY) * alpha
       this.drawOne(projectile, x, y)
+      // Collected here rather than on the tick, because this is where the
+      // interpolated position already exists - a light a frame behind the
+      // sprite it belongs to is visible at these speeds.
+      this.glow.collect(projectile, x, y)
     }
+  }
+
+  /**
+   * Lights the projectiles are throwing this frame. Rebuilt by `draw`, so read
+   * it after. Invented in full - see glow.ts.
+   */
+  get lights(): readonly RenderLight[] {
+    return this.glow.lights
+  }
+
+  /**
+   * The flash at the barrel. Invented; the original has none, and because
+   * `fire_object` is the shared dispatch it covers the monsters' guns too.
+   */
+  private muzzleFlash(kind: ProjectileKind, x: number, y: number): void {
+    const flash = MUZZLE[kind]
+    if (!flash) return
+    this.host.addLight?.(x, y, flash.outer, {
+      ticks: flash.ticks,
+      peak: flash.peak,
+      tint: flash.tint,
+    })
   }
 
   clear(): void {

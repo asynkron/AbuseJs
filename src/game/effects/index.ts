@@ -1,11 +1,13 @@
 import { Container } from 'pixi.js'
 
 import type { GameAssets } from '../../assets/loader'
-import type { LightSource } from '../../assets/types'
+import type { RenderLight } from '../../assets/types'
+import { Blood } from './Blood'
 import { TickClock } from './clock'
 import { DeathEffects } from './DeathEffects'
 import { Explosions } from './Explosions'
-import { ExplosionLights } from './lights'
+import { ExplosionLights, type FlashOptions } from './lights'
+import { Motes, type MoteSink } from './motes'
 import { Particles } from './Particles'
 import type { Hurtable, SoundPlayer, Terrain } from './types'
 
@@ -31,9 +33,17 @@ export interface EffectsOptions {
  * on it; `gibs` throws body parts. All of them are timed in original engine
  * ticks and stepped once every fourth sim tick (see clock.ts).
  *
- * Everything the subsystem draws lives in one container, because ten of the
- * eleven explosion characters and all twenty-four gib characters carry
- * `add_front`, which puts them in front of the actor list.
+ * Almost everything the subsystem draws lives in one container, because ten of
+ * the eleven explosion characters and all twenty-four gib characters carry
+ * `add_front`, which puts them in front of the actor list. Inside it the order
+ * is smoke and debris, then the authored fireball art, then the embers and the
+ * spray: the motes frame the sprites rather than burying them.
+ *
+ * `decals` is the exception, and the reason is the same rule read the other
+ * way. Blood on a floor is underneath everything standing on it, so the marks
+ * are handed out separately for the world to place below the actors. Sitting
+ * inside the world's own tree is also what gets them darkened by the lighting
+ * pass, which is most of why they look like part of the level.
  */
 export class EffectsSystem {
   readonly container = new Container()
@@ -41,29 +51,73 @@ export class EffectsSystem {
   readonly particles: Particles
   readonly explosions: Explosions
   readonly gibs: DeathEffects
+  readonly motes: Motes
+  readonly blood: Blood
+
+  /**
+   * What the weapons spawn effects through: the authored fireball art and the
+   * moving particles behind one handle, so `weapons/` needs a reference to
+   * exactly one thing out of here.
+   */
+  readonly bursts: {
+    spawn: Particles['spawn']
+    motes: MoteSink
+  }
 
   private readonly clock = new TickClock()
   private readonly flashes = new ExplosionLights()
 
   constructor(options: EffectsOptions) {
+    this.motes = new Motes(options.terrain)
+    this.blood = new Blood(options.terrain)
     this.particles = new Particles(options.assets, this.clock)
-    this.gibs = new DeathEffects(options.assets, options.terrain, this.clock)
-    this.explosions = new Explosions(this.particles, this.flashes, options.audio, options.targets)
-    this.container.addChild(this.particles.container, this.gibs.container)
+    this.gibs = new DeathEffects(options.assets, options.terrain, this.clock, this.blood)
+    this.explosions = new Explosions(
+      this.particles,
+      this.flashes,
+      this.motes,
+      options.audio,
+      options.targets,
+    )
+    this.bursts = {
+      spawn: (kind, x, y, delay, fade) => this.particles.spawn(kind, x, y, delay, fade),
+      motes: this.motes,
+    }
+    this.container.addChild(
+      this.motes.behind,
+      this.particles.container,
+      this.gibs.container,
+      this.motes.front,
+      this.blood.spray,
+    )
+  }
+
+  /** The blood marks, for the world to place under the actors. */
+  get decals(): Container {
+    return this.blood.decals
   }
 
   /** Call once per sim tick, anywhere in the tick. */
   update(): void {
+    // Outside the clock, on the 60 Hz tick: the flashes decay rather than
+    // simply expiring, and five steps of falloff staircases where twenty is
+    // smooth. Everything below transcribes a lisp duration and stays at 15 Hz.
+    this.flashes.advance()
+    this.motes.advance()
+    this.blood.advance()
+
     if (!this.clock.step()) return
     this.particles.advance()
     this.gibs.advance()
-    this.flashes.advance()
+    this.blood.dry()
   }
 
   /** `alpha` is the loop's leftover fraction of a sim tick. */
   draw(alpha: number): void {
     this.particles.draw()
     this.gibs.draw(alpha)
+    this.motes.draw()
+    this.blood.draw(alpha)
   }
 
   /**
@@ -71,20 +125,13 @@ export class EffectsSystem {
    * away again. The composers in `explosions` place their own; this is for
    * anything outside the subsystem that blows something up.
    */
-  flash(x: number, y: number, outer?: number): void {
-    this.flashes.add(x, y, outer)
+  flash(x: number, y: number, outer?: number, options?: FlashOptions): void {
+    this.flashes.add(x, y, outer, options)
   }
 
-  /**
-   * Dynamic lights to draw on top of the level's static ones. Empty most of
-   * the time - check `hasLights` before merging so a quiet frame costs nothing.
-   */
-  get lights(): readonly LightSource[] {
+  /** Dynamic lights to draw on top of the level's static ones. */
+  get lights(): readonly RenderLight[] {
     return this.flashes.lights
-  }
-
-  get hasLights(): boolean {
-    return !this.flashes.isEmpty
   }
 
   /** Engine ticks since the level started, for anything wanting `(game_tick)`. */
@@ -97,16 +144,26 @@ export class EffectsSystem {
     this.particles.clear()
     this.gibs.clear()
     this.flashes.clear()
+    this.motes.clear()
+    this.blood.clear()
     this.clock.reset()
   }
 }
 
+export { applyBlastGlow } from './blastGlow'
+export type { BlastGlow, BlastSize } from './blastGlow'
+export { Blood } from './Blood'
 export { SIM_TICKS_PER_TICK, TickClock } from './clock'
 export { DeathEffects, gibFlavourFor } from './DeathEffects'
 export type { GibFlavour, GibSet } from './DeathEffects'
 export { Explosions } from './Explosions'
+export { bloodFor } from './gore'
+export type { BloodProfile } from './gore'
 export { hurtRadius } from './hurtRadius'
 export { EXPLOSION_LIGHT_RADIUS, ExplosionLights } from './lights'
+export type { FlashOptions } from './lights'
+export { Motes } from './motes'
+export type { MoteSink, MoteSpec, MoteTemplate } from './motes'
 export { Particles } from './Particles'
 export { placeAnchored, placeMiddle, puffFrames } from './sprites'
 export type { PuffKind } from './sprites'
