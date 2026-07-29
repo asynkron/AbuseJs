@@ -15,12 +15,25 @@ import { Signals } from './Signals'
 import { buildPlatforms, type Platform } from './Platform'
 import { spawnProps, type Prop } from './Prop'
 import { buildTeleporters, type Teleporter } from './Teleporter'
+import { buildTurrets, type Turret } from './Turret'
 import { StatusBar } from '../render/StatusBar'
 import { TrainMessages } from './TrainMessages'
 import { isBlocked, isGrounded } from './collision'
 
 /** Damage one machine gun round does, from `do_damage 5` in weapons.lsp. */
 const BULLET_DAMAGE = 5
+
+/**
+ * Ammo pickups name their own amount: MBULLET_ICON20 is twenty rounds,
+ * ROCKET_ICON2 is two. Only the machine gun exists, so everything tops up the
+ * same pool for now.
+ */
+const AMMO_ICON = /_ICON(\d+)$/
+/** What a HEALTH pickup restores. */
+const HEALTH_PICKUP = 15
+const MAX_HEALTH = 100
+/** How close the player has to be to collect something. */
+const PICKUP_REACH = 18
 
 /** How close the player must stand to an exit portal to use it. */
 const EXIT_REACH_X = 20
@@ -45,6 +58,7 @@ export class World {
   private readonly props: Prop[]
   private readonly platforms: Platform[]
   private readonly teleporters: Teleporter[]
+  private readonly turrets: Turret[]
   /** The platform the player is standing on, so it can carry them. */
   private riding: Platform | null = null
   private visibleProps = 0
@@ -119,14 +133,15 @@ export class World {
     // Platforms take over from the inert props the level spawned for them.
     this.platforms = buildPlatforms(assets, level.objects, level.links, this.props)
     this.teleporters = buildTeleporters(assets, level.objects, level.links, this.props)
+    this.turrets = buildTurrets(assets, level.objects, this.props)
 
-    for (const prop of [...this.props, ...this.platforms, ...this.teleporters]) {
+    for (const prop of [...this.props, ...this.platforms, ...this.teleporters, ...this.turrets]) {
       this.propLayer.addChild(prop.sprite)
       if (prop.character === 'NEXT_LEVEL') this.exits.push(prop)
     }
 
     this.signals = new Signals(level.objects, level.links)
-    for (const prop of this.props) if (prop.hurtable) this.targets.push(prop)
+    for (const prop of [...this.props, ...this.turrets]) if (prop.hurtable) this.targets.push(prop)
 
     this.ambience = new AmbientSounds(audio, level.objects)
     this.messages = new TrainMessages(assets, level.objects, trainMessages)
@@ -176,6 +191,8 @@ export class World {
 
     this.signals.update(this.player.x, this.player.y)
     this.applySignals()
+    this.collectPickups()
+    for (const turret of this.turrets) turret.update(this.player.x, this.player.y)
 
     this.camera.follow(this.player.x, this.player.y - this.player.height / 2, {
       width: this.level.widthPx,
@@ -224,6 +241,36 @@ export class World {
 
       if (activating) platform.trigger()
       return
+    }
+  }
+
+  /**
+   * Picks up ammo and health the player walks over. The amount an ammo icon
+   * gives is in its own name.
+   */
+  private collectPickups(): void {
+    for (let i = this.props.length - 1; i >= 0; i--) {
+      const prop = this.props[i]
+      if (Math.abs(prop.x - this.player.x) > PICKUP_REACH) continue
+      if (Math.abs(prop.y - this.player.y) > PICKUP_REACH) continue
+
+      let taken = false
+      const ammo = AMMO_ICON.exec(prop.character)
+      if (ammo) {
+        this.player.ammo += Number(ammo[1])
+        this.audio.playNamed('AMMO_SND', { volume: 0.6, x: prop.x, y: prop.y })
+        taken = true
+      } else if (prop.character === 'HEALTH' && this.player.health < MAX_HEALTH) {
+        this.player.health = Math.min(MAX_HEALTH, this.player.health + HEALTH_PICKUP)
+        this.audio.playNamed('HEALTH_UP_SND', { volume: 0.6, x: prop.x, y: prop.y })
+        taken = true
+      }
+
+      if (!taken) continue
+      prop.sprite.destroy()
+      this.props.splice(i, 1)
+      const t = this.targets.indexOf(prop)
+      if (t >= 0) this.targets.splice(t, 1)
     }
   }
 
@@ -350,6 +397,7 @@ export class World {
 
     this.messages.layout(viewW, viewH, this.zoom)
     this.statusBar.setHealth(this.player.health)
+    this.statusBar.setWeapon(this.player.ammo)
     this.statusBar.layout(viewW, viewH, this.zoom)
   }
 
@@ -373,7 +421,7 @@ export class World {
     const bottom = cameraY + viewH + margin
 
     let visible = 0
-    for (const prop of [...this.props, ...this.platforms, ...this.teleporters]) {
+    for (const prop of [...this.props, ...this.platforms, ...this.teleporters, ...this.turrets]) {
       if (prop.x < left || prop.x > right || prop.y < top || prop.y > bottom) {
         prop.sprite.visible = false
         continue
@@ -398,7 +446,8 @@ export class World {
   get propCounts(): { visible: number; total: number } {
     return {
       visible: this.visibleProps,
-      total: this.props.length + this.platforms.length + this.teleporters.length,
+      total:
+        this.props.length + this.platforms.length + this.teleporters.length + this.turrets.length,
     }
   }
 
@@ -410,6 +459,7 @@ export class World {
       `${this.platforms.length} plat${moving ? `(${moving} moving)` : ''}` +
       `${this.riding ? ' riding' : ''} ${this.teleporters.length} tele${spinning ? '(spinning)' : ''}` +
       `${shots ? ` ${shots} shots` : ''}` +
+      ` ${this.turrets.filter((t) => t.isAwake).length}/${this.turrets.length} turrets` +
       ` sig ${this.signals.counts.active}/${this.signals.counts.sensors + this.signals.counts.gates}` +
       `${this.kills ? ` kills ${this.kills}` : ''}`
     )

@@ -57,8 +57,16 @@ const MUZZLE_OFFSETS: readonly (readonly [number, number])[] = [
   [-3, 8], [2, 8], [6, 9], [10, 10], [14, 13], [16, 15],
 ]
 
-/** Ticks between shots, from `fire_delay1` in lisp/people.lsp. */
+/**
+ * Ticks between shots. The original slows the gun right down when you are out
+ * of ammo rather than stopping it - 3 with, 7 without (lisp/people.lsp,
+ * `laser_ufun`), which is what "collect ammo to increase firing speed" in the
+ * tutorial is telling you.
+ */
 const FIRE_DELAY = 3
+const FIRE_DELAY_DRY = 7
+/** Rounds the cop starts a level with. */
+const STARTING_AMMO = 50
 
 export class Player extends Entity {
   /** Torso sprite, drawn over the legs. */
@@ -69,6 +77,8 @@ export class Player extends Entity {
   aimAngle = 0
   /** Nothing damages the player yet; this is what the status bar shows. */
   health: number
+  /** Machine gun rounds. Firing dry still works, just far slower. */
+  ammo = STARTING_AMMO
 
   private readonly topFrames: Frame[]
   private coyote = 0
@@ -254,7 +264,10 @@ export class Player extends Entity {
     if (this.fireCooldown > 0) this.fireCooldown--
     if (!wantsToFire || this.fireCooldown > 0) return null
 
-    this.fireCooldown = FIRE_DELAY
+    const dry = this.ammo <= 0
+    this.fireCooldown = dry ? FIRE_DELAY_DRY : FIRE_DELAY
+    if (!dry) this.ammo--
+
     const { x, y } = this.muzzle
     return { x, y, angle: this.aimAngle }
   }

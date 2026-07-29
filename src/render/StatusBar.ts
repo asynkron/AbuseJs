@@ -36,6 +36,7 @@ export class StatusBar {
 
   private panelHeight = 32
   private lastHealth = -1
+  private lastAmmo = -1
 
   constructor(private readonly assets: GameAssets) {
     const sbar = assets.imageTexture('art/statbar.spe#sbar')
@@ -80,6 +81,33 @@ export class StatusBar {
 
   private digitWidth(small: boolean): number {
     return this.digitTexture(0, small)?.width ?? 5
+  }
+
+  /**
+   * Shows the machine gun in slot 0 with its ammo count. The original lights
+   * the selected weapon's icon (`bweap`) and dims the rest (`dweap`); there is
+   * only one weapon so far, so it is always the lit one.
+   */
+  setWeapon(ammo: number): void {
+    const icon = this.weaponIcons[0]
+    if (icon) {
+      const texture = this.assets.imageTexture('art/statbar.spe#bweap0001.pcx')
+      if (texture) {
+        icon.texture = texture
+        icon.visible = true
+      }
+    }
+
+    const clamped = Math.max(0, Math.min(999, Math.round(ammo)))
+    if (clamped === this.lastAmmo) return
+    this.lastAmmo = clamped
+
+    const text = String(clamped).padStart(3, '0')
+    this.ammoDigits[0]?.forEach((sprite, i) => {
+      const texture = this.digitTexture(Number(text[i]), true)
+      if (texture) sprite.texture = texture
+      sprite.visible = texture !== null
+    })
   }
 
   /** Health is 0..999; the panel shows exactly three digits like the original. */

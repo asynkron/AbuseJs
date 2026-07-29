@@ -68,6 +68,13 @@ export class Entity implements Body {
     return this.frames.length
   }
 
+  /** Jumps straight to a frame, for animations driven by an angle. */
+  setFrame(index: number): void {
+    if (this.frames.length === 0) return
+    this.frameIndex = ((index % this.frames.length) + this.frames.length) % this.frames.length
+    this.frameClock = 0
+  }
+
   /** Advances the animation by `amount` frames; wraps around. */
   advanceAnimation(amount: number): void {
     if (this.frames.length <= 1) return
