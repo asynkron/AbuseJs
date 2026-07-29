@@ -11,12 +11,16 @@ import { TileLayer } from '../render/TileLayer'
 import { Level } from './Level'
 import { Player } from './Player'
 import { Bullets } from './Bullets'
+import { Signals } from './Signals'
 import { buildPlatforms, type Platform } from './Platform'
 import { spawnProps, type Prop } from './Prop'
 import { buildTeleporters, type Teleporter } from './Teleporter'
 import { StatusBar } from '../render/StatusBar'
 import { TrainMessages } from './TrainMessages'
 import { isBlocked, isGrounded } from './collision'
+
+/** Damage one machine gun round does, from `do_damage 5` in weapons.lsp. */
+const BULLET_DAMAGE = 5
 
 /** How close the player must stand to an exit portal to use it. */
 const EXIT_REACH_X = 20
@@ -80,6 +84,14 @@ export class World {
   /** Machine gun fire, drawn over the props but under the above-tiles. */
   private readonly bullets = new Bullets()
 
+  /** Sensors, gates and the objects they drive. */
+  private readonly signals: Signals
+  /** Props that can be shot, kept separate so bullets do not scan everything. */
+  private readonly targets: Prop[] = []
+  private kills = 0
+
+  private readonly assets: GameAssets
+
   constructor(
     assets: GameAssets,
     readonly level: Level,
@@ -88,6 +100,7 @@ export class World {
     private readonly audio: AudioBank,
     trainMessages: Record<number, string> = {},
   ) {
+    this.assets = assets
     this.bgTiles = new TileLayer(assets, level, 'back')
     this.fgTiles = new TileLayer(assets, level, 'fore', false)
     this.aboveTiles = new TileLayer(assets, level, 'fore', true)
@@ -111,6 +124,9 @@ export class World {
       this.propLayer.addChild(prop.sprite)
       if (prop.character === 'NEXT_LEVEL') this.exits.push(prop)
     }
+
+    this.signals = new Signals(level.objects, level.links)
+    for (const prop of this.props) if (prop.hurtable) this.targets.push(prop)
 
     this.ambience = new AmbientSounds(audio, level.objects)
     this.messages = new TrainMessages(assets, level.objects, trainMessages)
@@ -157,6 +173,9 @@ export class World {
     this.ridePlatforms(activating)
     this.useTeleporters(activating)
     this.fireWeapon(input.state.fire)
+
+    this.signals.update(this.player.x, this.player.y)
+    this.applySignals()
 
     this.camera.follow(this.player.x, this.player.y - this.player.height / 2, {
       width: this.level.widthPx,
@@ -209,6 +228,32 @@ export class World {
   }
 
   /**
+   * Lets the logic network drive the world: doors and force fields play their
+   * `running` state while switched on, and a platform wired to a switch runs
+   * on its own whenever that switch is live.
+   */
+  private applySignals(): void {
+    for (const prop of this.props) {
+      if (prop.objectIndex < 0 || prop.isDying || prop.isDead) continue
+      if (!this.assets.hasState(prop.character, 'running')) continue
+      if ((this.level.links[prop.objectIndex] ?? []).length === 0) continue
+
+      const on = this.signals.isDriven(prop.objectIndex)
+      const wanted = on ? 'running' : 'stopped'
+      if (prop.state !== wanted) prop.setState(wanted, true)
+    }
+
+    for (const platform of this.platforms) {
+      if (platform.isMoving) continue
+      // The third link is the platform's switch; with one wired, the switch
+      // runs it rather than the player.
+      const switches = (this.level.links[platform.objectIndex] ?? []).slice(2)
+      if (switches.length === 0) continue
+      if (switches.some((i) => this.signals.isActive(i))) platform.trigger()
+    }
+  }
+
+  /**
    * Fires the machine gun and advances the shots already in the air.
    *
    * Impact sounds alternate at random between the two the original uses
@@ -221,9 +266,20 @@ export class World {
       this.audio.playNamed('MGUN_SND', { volume: 0.5, x: shot.x, y: shot.y })
     }
 
-    for (const impact of this.bullets.update(this.level)) {
+    for (const impact of this.bullets.update(this.level, this.targets)) {
+      if (impact.hit?.damage(BULLET_DAMAGE)) this.kills++
       const which = Math.random() < 0.5 ? 'MG_HIT_SND1' : 'MG_HIT_SND2'
       this.audio.playNamed(which, { volume: 0.6, x: impact.x, y: impact.y })
+    }
+
+    // Retire anything whose corpse has lingered long enough.
+    for (let i = this.props.length - 1; i >= 0; i--) {
+      const prop = this.props[i]
+      if (!prop.isDead) continue
+      prop.sprite.destroy()
+      this.props.splice(i, 1)
+      const t = this.targets.indexOf(prop)
+      if (t >= 0) this.targets.splice(t, 1)
     }
   }
 
@@ -353,7 +409,9 @@ export class World {
     return (
       `${this.platforms.length} plat${moving ? `(${moving} moving)` : ''}` +
       `${this.riding ? ' riding' : ''} ${this.teleporters.length} tele${spinning ? '(spinning)' : ''}` +
-      `${shots ? ` ${shots} shots` : ''}`
+      `${shots ? ` ${shots} shots` : ''}` +
+      ` sig ${this.signals.counts.active}/${this.signals.counts.sensors + this.signals.counts.gates}` +
+      `${this.kills ? ` kills ${this.kills}` : ''}`
     )
   }
 

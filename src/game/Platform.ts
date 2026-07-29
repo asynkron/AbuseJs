@@ -51,8 +51,13 @@ export class Platform extends Prop {
   deltaX = 0
   deltaY = 0
 
-  constructor(assets: GameAssets, data: LevelObjectData, endpoints: { x: number; y: number }[]) {
-    super(assets, data)
+  constructor(
+    assets: GameAssets,
+    data: LevelObjectData,
+    endpoints: { x: number; y: number }[],
+    objectIndex: number,
+  ) {
+    super(assets, data, objectIndex)
     this.from = endpoints[0]
     this.to = endpoints[1]
     this.boardingReach = assets.ability(data.type, 'start_accel') ?? DEFAULT_SNAP
@@ -148,7 +153,7 @@ export function buildPlatforms(
     // Endpoints that coincide would make a platform that never goes anywhere.
     if (endpoints[0].x === endpoints[1].x && endpoints[0].y === endpoints[1].y) return
 
-    const platform = new Platform(assets, object, endpoints)
+    const platform = new Platform(assets, object, endpoints, index)
     platforms.push(platform)
 
     // Replace the inert prop that was spawned for this object.

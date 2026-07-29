@@ -189,6 +189,8 @@ export interface CharacterDef {
   aiFun?: string
   /** `(abilities (start_hp 100) (run_top_speed 9) ...)` as a plain record. */
   abilities?: Record<string, number>
+  /** `(flags (hurtable T) (can_block T) ...)` as a set of the ones set true. */
+  flags?: string[]
 }
 
 /**
@@ -287,6 +289,7 @@ export function extractCharacters(forms: Sexp[]): CharacterDef[] {
     let drawFun: string | undefined
     let aiFun: string | undefined
     let abilities: Record<string, number> | undefined
+    let flags: string[] | undefined
 
     for (const clause of form.slice(2)) {
       if (!Array.isArray(clause)) continue
@@ -298,6 +301,14 @@ export function extractCharacters(forms: Sexp[]): CharacterDef[] {
         for (const ability of clause.slice(1)) {
           if (Array.isArray(ability) && isSymbol(ability[0]) && typeof ability[1] === 'number') {
             abilities[ability[0].name] = ability[1]
+          }
+        }
+      } else if (isSymbol(clause[0], 'flags')) {
+        flags = []
+        for (const flag of clause.slice(1)) {
+          // `(name T)` sets it; anything else leaves it at its default of off.
+          if (Array.isArray(flag) && isSymbol(flag[0]) && isSymbol(flag[1], 'T')) {
+            flags.push(flag[0].name)
           }
         }
       } else if (isSymbol(clause[0], 'funs')) {
@@ -324,7 +335,7 @@ export function extractCharacters(forms: Sexp[]): CharacterDef[] {
     }
 
     if (Object.keys(states).length === 0) continue
-    out.push({ name: nameNode.name, file: statesForm[1], states, range, drawFun, aiFun, abilities })
+    out.push({ name: nameNode.name, file: statesForm[1], states, range, drawFun, aiFun, abilities, flags })
   }
 
   return out

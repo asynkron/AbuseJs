@@ -28,8 +28,9 @@ export class Teleporter extends Prop {
     assets: GameAssets,
     data: LevelObjectData,
     readonly destination: { x: number; y: number },
+    objectIndex = -1,
   ) {
-    super(assets, data)
+    super(assets, data, objectIndex)
     // Pads saved mid-cycle should still start at rest.
     this.setState(assets.hasState(data.type, 'stopped') ? 'stopped' : data.state, true)
 
@@ -88,7 +89,7 @@ export function buildTeleporters(
     if (target === undefined || target === index) return
 
     const destination = { x: objects[target].x, y: objects[target].y }
-    teleporters.push(new Teleporter(assets, object, destination))
+    teleporters.push(new Teleporter(assets, object, destination, index))
 
     const existing = props.findIndex((p) => p.data === object)
     if (existing >= 0) props.splice(existing, 1)

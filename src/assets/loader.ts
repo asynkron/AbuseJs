@@ -182,6 +182,11 @@ export class GameAssets {
     return this.chars.characters[character]?.abilities?.[name]
   }
 
+  /** True when the character declares the given `(flags ...)` entry. */
+  hasFlag(character: string, flag: string): boolean {
+    return this.chars.characters[character]?.flags?.includes(flag) === true
+  }
+
   /** True for the handful of objects that cycle their frames on their own. */
   isIdleAnimated(character: string): boolean {
     return this.chars.characters[character]?.idleAnimated === true

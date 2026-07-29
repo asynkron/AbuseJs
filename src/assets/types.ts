@@ -59,6 +59,8 @@ export interface CharacterManifest {
   tints?: string
   /** `(abilities ...)` from the character definition, e.g. `start_hp`. */
   abilities?: Record<string, number>
+  /** `(flags ...)` set true on the character, e.g. `hurtable`, `can_block`. */
+  flags?: string[]
 }
 
 export interface CharsManifest {
@@ -86,6 +88,7 @@ export interface LevelObjectData {
   xvel: number
   yvel: number
   xacel: number
+  yacel: number
 }
 
 export interface ImagesManifest {

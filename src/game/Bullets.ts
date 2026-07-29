@@ -1,6 +1,7 @@
 import { Graphics } from 'pixi.js'
 
 import type { Level } from './Level'
+import type { Prop } from './Prop'
 
 /**
  * Machine gun fire.
@@ -38,6 +39,8 @@ interface Bullet {
 export interface Impact {
   x: number
   y: number
+  /** The prop that was struck, if it hit something rather than the level. */
+  hit?: Prop
 }
 
 export class Bullets {
@@ -70,7 +73,7 @@ export class Bullets {
   }
 
   /** Advances every bullet, returning where any of them struck. */
-  update(level: Level): Impact[] {
+  update(level: Level, targets: readonly Prop[] = []): Impact[] {
     const impacts: Impact[] = []
 
     for (const bullet of this.pool) {
@@ -89,7 +92,12 @@ export class Bullets {
       for (let i = 0; i < steps && !hit; i++) {
         bullet.x += bullet.vx / steps
         bullet.y += bullet.vy / steps
-        if (blocked(level, bullet.x, bullet.y)) {
+
+        const struck = hitTarget(targets, bullet.x, bullet.y)
+        if (struck) {
+          hit = true
+          impacts.push({ x: bullet.x, y: bullet.y, hit: struck })
+        } else if (blocked(level, bullet.x, bullet.y)) {
           hit = true
           impacts.push({ x: bullet.x, y: bullet.y })
         }
@@ -117,6 +125,16 @@ export class Bullets {
     for (const bullet of this.pool) bullet.alive = false
     this.graphics.clear()
   }
+}
+
+/** The first live target whose box contains this point. */
+function hitTarget(targets: readonly Prop[], x: number, y: number): Prop | undefined {
+  for (const target of targets) {
+    if (target.isDying || target.isDead) continue
+    const box = target.hitBox
+    if (x >= box.left && x < box.right && y >= box.top && y < box.bottom) return target
+  }
+  return undefined
 }
 
 /** A bullet stops at the first solid pixel column it enters. */

@@ -608,6 +608,7 @@ async function convertSprites(
       idleAnimated?: true
       tints?: string
       abilities?: Record<string, number>
+      flags?: string[]
     }
   > = {}
   let unresolved = 0
@@ -631,6 +632,7 @@ async function convertSprites(
         ...(c.aiFun && idleAnimatorAiFuns.has(c.aiFun) ? { idleAnimated: true as const } : {}),
         ...(tinted ? { tints: tinted.array } : {}),
         ...(c.abilities && Object.keys(c.abilities).length ? { abilities: c.abilities } : {}),
+        ...(c.flags && c.flags.length ? { flags: c.flags } : {}),
       }
     }
   }
@@ -821,6 +823,7 @@ interface LevelObject {
   xvel: number
   yvel: number
   xacel: number
+  yacel: number
 }
 
 function readObjects(spec: SpecFile, buf: Buffer): LevelObject[] {
@@ -884,6 +887,7 @@ function readObjects(spec: SpecFile, buf: Buffer): LevelObject[] {
       xvel: fields.xvel?.[i] ?? 0,
       yvel: fields.yvel?.[i] ?? 0,
       xacel: fields.xacel?.[i] ?? 0,
+      yacel: fields.yacel?.[i] ?? 0,
     })
   }
   return out

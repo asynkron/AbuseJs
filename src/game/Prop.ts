@@ -14,6 +14,8 @@ import { Entity } from './Entity'
 export class Prop extends Entity {
   /** Animation rate in frames per second. */
   private static readonly FPS = 10
+  /** How long a corpse lingers before being removed. */
+  private static readonly DEATH_TICKS = 90
 
   /**
    * Whether this object cycles its frames on its own.
@@ -25,9 +27,19 @@ export class Prop extends Entity {
    */
   private readonly loops: boolean
 
+  /** Can be shot, from the character's `(flags (hurtable T))`. */
+  readonly hurtable: boolean
+  /** Remaining health, from the character's `start_hp` ability. */
+  health: number
+  /** Counts down once killed, so the death frame is visible before removal. */
+  private deathTimer = 0
+  private dead = false
+
   constructor(
     assets: GameAssets,
     readonly data: LevelObjectData,
+    /** Index in the level's object list, for looking up its links. */
+    readonly objectIndex = -1,
   ) {
     super(assets, data.type)
     this.setPosition(data.x, data.y)
@@ -42,23 +54,67 @@ export class Prop extends Entity {
     this.setState(state, true)
 
     this.loops = assets.isIdleAnimated(data.type)
+    this.hurtable = assets.hasFlag(data.type, 'hurtable')
+    // Levels store a per-object hp; fall back to the character's own start_hp.
+    this.health = data.hp || assets.ability(data.type, 'start_hp') || 1
   }
 
   advance(dt: number): void {
+    if (this.deathTimer > 0 && --this.deathTimer === 0) this.dead = true
     if (!this.loops) return
     this.advanceAnimation(Prop.FPS * dt)
+  }
+
+  get isDead(): boolean {
+    return this.dead
+  }
+
+  get isDying(): boolean {
+    return this.deathTimer > 0
+  }
+
+  /** The box shots and the player test against, taken from the sprite. */
+  get hitBox(): { left: number; top: number; right: number; bottom: number } {
+    const frame = this.currentFrame
+    const width = frame?.width ?? 16
+    const height = frame?.height ?? 16
+    const anchor = frame?.xcfg ?? width / 2
+    const left = this.direction < 0 ? this.x - (width - anchor - 1) : this.x - anchor
+    return { left, top: this.y - height + 1, right: left + width, bottom: this.y + 1 }
+  }
+
+  /**
+   * Applies damage. Returns true if this killed it, which switches to the
+   * death animation if the character has one and starts the removal timer.
+   */
+  damage(amount: number): boolean {
+    if (!this.hurtable || this.deathTimer > 0 || this.dead) return false
+
+    this.health -= amount
+    if (this.health > 0) return false
+
+    this.health = 0
+    // `dieing` is the death throe, `dead` the corpse; most have one or neither.
+    for (const state of ['dieing', 'dead']) {
+      if (this.assets.hasState(this.character, state)) {
+        this.setState(state, true)
+        break
+      }
+    }
+    this.deathTimer = Prop.DEATH_TICKS
+    return true
   }
 }
 
 /** Objects worth putting in the world: known, drawable, not editor-only. */
 export function spawnProps(assets: GameAssets, objects: LevelObjectData[]): Prop[] {
   const props: Prop[] = []
-  for (const object of objects) {
+  objects.forEach((object, index) => {
     // Types absent from the scripts were deleted from the game after these
     // levels were saved; the original drops them on load too.
-    if (!assets.character(object.type)) continue
-    if (assets.isEditorOnly(object.type)) continue
-    props.push(new Prop(assets, object))
-  }
+    if (!assets.character(object.type)) return
+    if (assets.isEditorOnly(object.type)) return
+    props.push(new Prop(assets, object, index))
+  })
   return props
 }
