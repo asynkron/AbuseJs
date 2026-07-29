@@ -43,6 +43,9 @@ const CONSOLE_REACH_Y = 40
 /** How close the player must stand to an exit portal to use it. */
 const EXIT_REACH_X = 20
 const EXIT_REACH_Y = 40
+/** ...and how close before it says so. Wider, or you never find out it is there. */
+const EXIT_PROMPT_X = 46
+const EXIT_PROMPT_Y = 52
 
 /**
  * Owns a loaded level and everything drawn in it.
@@ -264,7 +267,7 @@ export class World {
     this.messages.update(this.player.x, this.player.y)
 
     // Down is the original's action key; E/Enter are kept as alternates.
-    if (activating) this.checkExits()
+    this.checkExits(activating)
   }
 
   /**
@@ -553,16 +556,33 @@ export class World {
     }
   }
 
-  /** Standing on an exit with the action key held requests the next level. */
-  private checkExits(): void {
+  /**
+   * Standing on an exit with the action key held requests the next level, and
+   * standing near one says so.
+   *
+   * The levels put no TRAIN_MSG on their exits - the original expects you to
+   * recognise the portal - so without the prompt you can walk past the end of
+   * a level without knowing it was there. The prompt radius is wider than the
+   * one that actually works, so the message arrives before the spot does.
+   */
+  private checkExits(activating: boolean): void {
     if (this.requestedLevel) return
 
     for (const exit of this.exits) {
-      if (Math.abs(exit.x - this.player.x) > EXIT_REACH_X) continue
-      if (Math.abs(exit.y - this.player.y) > EXIT_REACH_Y) continue
+      const dx = Math.abs(exit.x - this.player.x)
+      const dy = Math.abs(exit.y - this.player.y)
+      if (dx > EXIT_PROMPT_X || dy > EXIT_PROMPT_Y) continue
 
-      const destination = exit.data.aistate
-      this.requestedLevel = `levels/level${String(destination).padStart(2, '0')}`
+      const destination = `level ${String(exit.data.aistate).padStart(2, '0')}`
+      if (dx > EXIT_REACH_X || dy > EXIT_REACH_Y) {
+        this.messages.prompt(`Exit to ${destination} - stand on it and press down`)
+        continue
+      }
+
+      this.messages.prompt(`Press down to enter ${destination}`)
+      if (!activating) continue
+
+      this.requestedLevel = `levels/level${String(exit.data.aistate).padStart(2, '0')}`
       return
     }
   }

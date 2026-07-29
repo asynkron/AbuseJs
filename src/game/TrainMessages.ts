@@ -51,6 +51,19 @@ export class TrainMessages {
     this.container.visible = false
   }
 
+  /**
+   * Shows a line the world worked out for itself, rather than one a marker in
+   * the level carries. Used for the "press down to..." prompts, which have no
+   * TRAIN_MSG behind them - the levels expect you to already know.
+   */
+  prompt(text: string): void {
+    if (text !== this.current) {
+      this.current = text
+      this.draw(text)
+    }
+    this.timer = LINGER_TICKS
+  }
+
   update(playerX: number, playerY: number): void {
     for (const marker of this.markers) {
       if (Math.abs(marker.x - playerX) > TRIGGER_RADIUS_X) continue

@@ -149,6 +149,12 @@ them on whichever frame they died on. The corpse countdown runs from the simulat
 pass: the draw pass skips anything off screen, so a body killed just as it scrolled away would wait
 forever for a tick that only arrived if you looked back at it.
 
+**Exits announce themselves.** The levels put no TRAIN_MSG on their `NEXT_LEVEL` portals — the
+original expects you to recognise one on sight — so it was possible to walk past the end of a level
+without knowing it was there. Come within 46px and it says which level it goes to; stand on it and
+it says to press down. level00 has five, and the one that finishes the tutorial is at (2655, 1431),
+at the bottom right past the last sign.
+
 **The save console** is `RESTART_POSITION` — the same marker a fresh level spawns you at, which is
 why using one is literally moving where you restart. Its `stopped` state is the six-frame idle
 flicker and `running` is `console_on`, so the art already had an activated look to switch to. Press
