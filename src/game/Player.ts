@@ -67,6 +67,10 @@ const FIRE_DELAY = 3
 const FIRE_DELAY_DRY = 7
 /** Rounds the cop starts a level with. */
 const STARTING_AMMO = 50
+/** Ticks of invulnerability after being hit, so one turret cannot chain-kill. */
+const HURT_INVULNERABLE = 30
+/** Ticks the death animation holds before respawning. */
+const DEATH_TICKS = 120
 
 export class Player extends Entity {
   /** Torso sprite, drawn over the legs. */
@@ -79,6 +83,18 @@ export class Player extends Entity {
   health: number
   /** Machine gun rounds. Firing dry still works, just far slower. */
   ammo = STARTING_AMMO
+
+  private invulnerable = 0
+  private deathTimer = 0
+
+  get isDead(): boolean {
+    return this.deathTimer > 0
+  }
+
+  /** Flashes while briefly invulnerable, so a hit reads. */
+  get isHurt(): boolean {
+    return this.invulnerable > 0
+  }
 
   private readonly topFrames: Frame[]
   private coyote = 0
@@ -109,6 +125,17 @@ export class Player extends Entity {
   update(input: InputState, jumpPressed: boolean): void {
     this.prevX = this.x
     this.prevY = this.y
+
+    if (this.invulnerable > 0) this.invulnerable--
+
+    // Dead: hold still and let the timer run the respawn.
+    if (this.deathTimer > 0) {
+      this.deathTimer--
+      this.vx = 0
+      this.vy = Math.min(this.vy + PHYSICS.gravity, PHYSICS.maxFall)
+      moveAndCollide(this.level, this, 0, this.vy)
+      return
+    }
 
     const axis = (input.right ? 1 : 0) - (input.left ? 1 : 0)
     const running = input.run
@@ -182,6 +209,38 @@ export class Player extends Entity {
   }
 
   /**
+   * Takes damage. Returns true if this killed the player, which starts the
+   * death animation and the respawn timer.
+   */
+  hurt(amount: number): boolean {
+    if (this.invulnerable > 0 || this.deathTimer > 0) return false
+    // Already down and waiting to respawn. Without this a turret that keeps
+    // shooting the body restarts the death timer every time it expires, and
+    // the respawn never gets a tick to happen in.
+    if (this.health <= 0) return false
+
+    this.health = Math.max(0, this.health - amount)
+    this.invulnerable = HURT_INVULNERABLE
+    if (this.health > 0) return false
+
+    if (this.assets.hasState(this.character, 'dead')) this.setState('dead', true)
+    this.deathTimer = DEATH_TICKS
+    return true
+  }
+
+  /** Puts the cop back on their feet at a fresh spawn point. */
+  revive(x: number, y: number): void {
+    this.setPosition(x, y)
+    this.vx = 0
+    this.vy = 0
+    this.health = this.assets.ability('DARNEL', 'start_hp') ?? 100
+    this.ammo = STARTING_AMMO
+    this.deathTimer = 0
+    this.invulnerable = HURT_INVULNERABLE
+    this.setState('stopped', true)
+  }
+
+  /**
    * Puts the player on a surface the tile grid knows nothing about - a moving
    * platform. This has to refresh the coyote timer as well as the flag:
    * `update` only ever renews it from tile grounding, so without this the
@@ -212,7 +271,12 @@ export class Player extends Entity {
       return
     }
 
-    this.topSprite.visible = true
+    // Blink while invulnerable so a hit is visible.
+    const blink = this.invulnerable > 0 && Math.floor(this.invulnerable / 4) % 2 === 1
+    this.sprite.alpha = blink ? 0.35 : 1
+    this.topSprite.alpha = this.sprite.alpha
+
+    this.topSprite.visible = !this.isDead
     this.topSprite.texture = frame.texture
 
     const x = this.prevX + (this.x - this.prevX) * alpha + (this.direction < 0 ? TOP_FLIP_NUDGE : 0)

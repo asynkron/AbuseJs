@@ -16,12 +16,17 @@ import { buildPlatforms, type Platform } from './Platform'
 import { spawnProps, type Prop } from './Prop'
 import { buildTeleporters, type Teleporter } from './Teleporter'
 import { buildTurrets, type Turret } from './Turret'
+import { buildCeilingAnts, type CeilingAnt } from './CeilingAnt'
 import { StatusBar } from '../render/StatusBar'
 import { TrainMessages } from './TrainMessages'
 import { isBlocked, isGrounded } from './collision'
 
 /** Damage one machine gun round does, from `do_damage 5` in weapons.lsp. */
 const BULLET_DAMAGE = 5
+/** What a turret's shot takes off the player. */
+const ENEMY_BULLET_DAMAGE = 6
+/** Enemy tracers are red, so incoming fire reads at a glance. */
+const ENEMY_TRACER = 0xff6a4a
 
 /**
  * Ammo pickups name their own amount: MBULLET_ICON20 is twenty rounds,
@@ -59,6 +64,9 @@ export class World {
   private readonly platforms: Platform[]
   private readonly teleporters: Teleporter[]
   private readonly turrets: Turret[]
+  private readonly ants: CeilingAnt[]
+  /** Enemy fire, which hits the player rather than props. */
+  private readonly enemyBullets = new Bullets()
   /** The platform the player is standing on, so it can carry them. */
   private riding: Platform | null = null
   private visibleProps = 0
@@ -125,6 +133,7 @@ export class World {
       this.propLayer,
       this.entityLayer,
       this.bullets.graphics,
+      this.enemyBullets.graphics,
       this.aboveTiles.container,
     )
     this.root.addChild(this.backdrop, this.scene)
@@ -134,14 +143,23 @@ export class World {
     this.platforms = buildPlatforms(assets, level.objects, level.links, this.props)
     this.teleporters = buildTeleporters(assets, level.objects, level.links, this.props)
     this.turrets = buildTurrets(assets, level.objects, this.props)
+    this.ants = buildCeilingAnts(assets, level.objects, this.props, level)
 
-    for (const prop of [...this.props, ...this.platforms, ...this.teleporters, ...this.turrets]) {
+    for (const prop of [
+      ...this.props,
+      ...this.platforms,
+      ...this.teleporters,
+      ...this.turrets,
+      ...this.ants,
+    ]) {
       this.propLayer.addChild(prop.sprite)
       if (prop.character === 'NEXT_LEVEL') this.exits.push(prop)
     }
 
     this.signals = new Signals(level.objects, level.links)
-    for (const prop of [...this.props, ...this.turrets]) if (prop.hurtable) this.targets.push(prop)
+    for (const prop of [...this.props, ...this.turrets, ...this.ants]) {
+      if (prop.hurtable) this.targets.push(prop)
+    }
 
     this.ambience = new AmbientSounds(audio, level.objects)
     this.messages = new TrainMessages(assets, level.objects, trainMessages)
@@ -192,7 +210,7 @@ export class World {
     this.signals.update(this.player.x, this.player.y)
     this.applySignals()
     this.collectPickups()
-    for (const turret of this.turrets) turret.update(this.player.x, this.player.y)
+    this.updateEnemies()
 
     this.camera.follow(this.player.x, this.player.y - this.player.height / 2, {
       width: this.level.widthPx,
@@ -241,6 +259,55 @@ export class World {
 
       if (activating) platform.trigger()
       return
+    }
+  }
+
+  /**
+   * Runs the enemies: turrets track and shoot, ceiling ants drop and give
+   * chase, and anything that lands on the player hurts them.
+   */
+  private updateEnemies(): void {
+    const player = this.player
+
+    for (const turret of this.turrets) {
+      turret.update(player.x, player.y)
+      const shot = turret.takeShot()
+      if (!shot) continue
+      this.enemyBullets.spawn(shot.x, shot.y, shot.angle, ENEMY_TRACER)
+      this.audio.playNamed('MGUN_SND', { volume: 0.35, x: shot.x, y: shot.y })
+    }
+
+    for (const ant of this.ants) {
+      if (ant.isDying || ant.isDead) continue
+      ant.update(player.x, player.y)
+      const touch = ant.touchDamage(player.x, player.y, player.halfWidth, player.height)
+      if (touch) this.hurtPlayer(touch)
+    }
+
+    const box = {
+      left: player.x - player.halfWidth,
+      top: player.y - player.height,
+      right: player.x + player.halfWidth,
+      bottom: player.y + 1,
+    }
+    for (const impact of this.enemyBullets.update(this.level, [], box)) {
+      if (impact.hitPlayer) this.hurtPlayer(ENEMY_BULLET_DAMAGE)
+      const which = Math.random() < 0.5 ? 'MG_HIT_SND1' : 'MG_HIT_SND2'
+      this.audio.playNamed(which, { volume: 0.5, x: impact.x, y: impact.y })
+    }
+
+    // Respawn once the death animation has run its course.
+    if (player.isDead) return
+    if (player.health <= 0) {
+      const spawn = this.findSpawn()
+      player.revive(spawn.x, spawn.y)
+      this.riding = null
+    }
+  }
+
+  private hurtPlayer(amount: number): void {
+    if (this.player.hurt(amount)) {
+      this.audio.playNamed('MG_HIT_SND2', { volume: 0.8, x: this.player.x, y: this.player.y })
     }
   }
 
@@ -386,6 +453,7 @@ export class World {
     this.updateProps(camera.x, camera.y, viewW, viewH, alpha)
     this.player.draw(alpha)
     this.bullets.draw()
+    this.enemyBullets.draw()
 
     // Layers are placed in world space; the containers carry the camera offset.
     this.backdrop.position.set(-bgX, -bgY)
@@ -421,7 +489,13 @@ export class World {
     const bottom = cameraY + viewH + margin
 
     let visible = 0
-    for (const prop of [...this.props, ...this.platforms, ...this.teleporters, ...this.turrets]) {
+    for (const prop of [
+      ...this.props,
+      ...this.platforms,
+      ...this.teleporters,
+      ...this.turrets,
+      ...this.ants,
+    ]) {
       if (prop.x < left || prop.x > right || prop.y < top || prop.y > bottom) {
         prop.sprite.visible = false
         continue
@@ -447,7 +521,11 @@ export class World {
     return {
       visible: this.visibleProps,
       total:
-        this.props.length + this.platforms.length + this.teleporters.length + this.turrets.length,
+        this.props.length +
+        this.platforms.length +
+        this.teleporters.length +
+        this.turrets.length +
+        this.ants.length,
     }
   }
 
@@ -460,6 +538,7 @@ export class World {
       `${this.riding ? ' riding' : ''} ${this.teleporters.length} tele${spinning ? '(spinning)' : ''}` +
       `${shots ? ` ${shots} shots` : ''}` +
       ` ${this.turrets.filter((t) => t.isAwake).length}/${this.turrets.length} turrets` +
+      ` ${this.ants.filter((a) => a.isActive).length}/${this.ants.length} ants` +
       ` sig ${this.signals.counts.active}/${this.signals.counts.sensors + this.signals.counts.gates}` +
       `${this.kills ? ` kills ${this.kills}` : ''}`
     )
@@ -476,6 +555,7 @@ export class World {
    */
   destroy(): void {
     this.bullets.clear()
+    this.enemyBullets.clear()
     this.lights.destroy()
     this.messages.destroy()
     this.statusBar.destroy()

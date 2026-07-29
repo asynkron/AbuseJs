@@ -20,6 +20,10 @@ const WAKE_RANGE = 260
 const SLEEP_MARGIN = 60
 /** Frames per second for opening and closing. */
 const OPEN_FPS = 14
+/** Ticks between shots once it has a bead on you. */
+const FIRE_DELAY = 40
+/** It will not open fire the instant it opens; this is the wind-up. */
+const AIM_SETTLE = 25
 
 interface TurretStates {
   aim: string
@@ -38,6 +42,9 @@ type Phase = 'dormant' | 'opening' | 'tracking' | 'closing'
 export class Turret extends Prop {
   private phase: Phase = 'dormant'
   private timer = 0
+  private fireTimer = 0
+  /** Set on the tick it fires, for the caller to spawn a shot. */
+  private pendingShot: { x: number; y: number; angle: number } | null = null
   private readonly states: TurretStates
   private readonly aimFrames: number
 
@@ -64,13 +71,25 @@ export class Turret extends Prop {
         if (this.step()) this.begin('tracking', this.states.aim)
         break
 
-      case 'tracking':
+      case 'tracking': {
         if (distance > WAKE_RANGE + SLEEP_MARGIN) {
           this.begin('closing', this.states.close)
           break
         }
-        this.aimAt(playerX, playerY)
+        const angle = this.aimAt(playerX, playerY)
+        if (this.timer < AIM_SETTLE) {
+          this.timer++
+        } else if (--this.fireTimer <= 0) {
+          this.fireTimer = FIRE_DELAY
+          // Muzzle is roughly the barrel tip; close enough not to shoot itself.
+          this.pendingShot = {
+            x: this.x + Math.cos((angle * Math.PI) / 180) * 14,
+            y: this.y - 8 - Math.sin((angle * Math.PI) / 180) * 14,
+            angle,
+          }
+        }
         break
+      }
 
       case 'closing':
         if (this.step()) {
@@ -81,9 +100,17 @@ export class Turret extends Prop {
     }
   }
 
+  /** Consumes a shot the turret decided to take this tick. */
+  takeShot(): { x: number; y: number; angle: number } | null {
+    const shot = this.pendingShot
+    this.pendingShot = null
+    return shot
+  }
+
   private begin(phase: Phase, state: string | undefined): void {
     this.phase = phase
     this.timer = 0
+    this.fireTimer = FIRE_DELAY
     if (state && this.assets.hasState(this.character, state)) this.setState(state, true)
   }
 
@@ -98,12 +125,13 @@ export class Turret extends Prop {
    * Points the barrel at the player by choosing among the aim frames, the same
    * way the player's torso picks one of its 24.
    */
-  private aimAt(playerX: number, playerY: number): void {
-    if (this.aimFrames === 0) return
-    const angle = (Math.atan2(-(playerY - this.y), playerX - this.x) * 180) / Math.PI
+  private aimAt(playerX: number, playerY: number): number {
+    const angle = (Math.atan2(-(playerY - 10 - this.y), playerX - this.x) * 180) / Math.PI
+    if (this.aimFrames === 0) return angle
     const local = this.direction >= 0 ? angle : 180 - angle
     const normalized = ((local % 360) + 360) % 360
     this.setFrame(Math.round((normalized / 360) * this.aimFrames) % this.aimFrames)
+    return angle
   }
 }
 

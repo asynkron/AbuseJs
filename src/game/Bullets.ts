@@ -29,6 +29,8 @@ interface Bullet {
   y: number
   vx: number
   vy: number
+  /** Tint, so enemy fire reads differently from the player's. */
+  colour: number
   /** Where this bullet started life this tick, for drawing the tracer. */
   fromX: number
   fromY: number
@@ -41,6 +43,16 @@ export interface Impact {
   y: number
   /** The prop that was struck, if it hit something rather than the level. */
   hit?: Prop
+  /** True when this one struck the player. */
+  hitPlayer?: boolean
+}
+
+/** Box the player occupies, for bullets that are aimed at them. */
+export interface PlayerBox {
+  left: number
+  top: number
+  right: number
+  bottom: number
 }
 
 export class Bullets {
@@ -52,7 +64,7 @@ export class Bullets {
     return this.pool.filter((b) => b.alive).length
   }
 
-  spawn(x: number, y: number, angleDegrees: number): void {
+  spawn(x: number, y: number, angleDegrees: number, colour = 0xffe9a0): void {
     const radians = (angleDegrees * Math.PI) / 180
     const bullet = this.pool.find((b) => !b.alive) ?? this.push()
     bullet.x = x
@@ -63,17 +75,24 @@ export class Bullets {
     bullet.vx = Math.cos(radians) * SPEED
     bullet.vy = -Math.sin(radians) * SPEED
     bullet.ticks = 0
+    bullet.colour = colour
     bullet.alive = true
   }
 
   private push(): Bullet {
-    const bullet: Bullet = { x: 0, y: 0, vx: 0, vy: 0, fromX: 0, fromY: 0, ticks: 0, alive: false }
+    const bullet: Bullet = {
+      x: 0, y: 0, vx: 0, vy: 0, fromX: 0, fromY: 0, ticks: 0, colour: 0xffe9a0, alive: false,
+    }
     this.pool.push(bullet)
     return bullet
   }
 
-  /** Advances every bullet, returning where any of them struck. */
-  update(level: Level, targets: readonly Prop[] = []): Impact[] {
+  /**
+   * Advances every bullet, returning where any of them struck. `targets` are
+   * props the shots can hit; `playerBox` makes them hit the player instead,
+   * which is what enemy fire uses.
+   */
+  update(level: Level, targets: readonly Prop[] = [], playerBox?: PlayerBox): Impact[] {
     const impacts: Impact[] = []
 
     for (const bullet of this.pool) {
@@ -97,6 +116,9 @@ export class Bullets {
         if (struck) {
           hit = true
           impacts.push({ x: bullet.x, y: bullet.y, hit: struck })
+        } else if (playerBox && inBox(playerBox, bullet.x, bullet.y)) {
+          hit = true
+          impacts.push({ x: bullet.x, y: bullet.y, hitPlayer: true })
         } else if (blocked(level, bullet.x, bullet.y)) {
           hit = true
           impacts.push({ x: bullet.x, y: bullet.y })
@@ -117,7 +139,7 @@ export class Bullets {
       this.graphics
         .moveTo(bullet.fromX, bullet.fromY)
         .lineTo(bullet.x, bullet.y)
-        .stroke({ width: 1, color: 0xffe9a0, alpha: 0.85 })
+        .stroke({ width: 1, color: bullet.colour, alpha: 0.85 })
     }
   }
 
@@ -125,6 +147,10 @@ export class Bullets {
     for (const bullet of this.pool) bullet.alive = false
     this.graphics.clear()
   }
+}
+
+function inBox(box: PlayerBox, x: number, y: number): boolean {
+  return x >= box.left && x < box.right && y >= box.top && y < box.bottom
 }
 
 /** The first live target whose box contains this point. */
