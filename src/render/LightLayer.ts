@@ -1,6 +1,6 @@
 import { Container, Rectangle, RenderTexture, Sprite, Texture, type Renderer } from 'pixi.js'
 
-import type { LightSource } from '../assets/types'
+import type { RenderLight } from '../assets/types'
 
 /**
  * Abuse's static per-level lighting.
@@ -21,6 +21,14 @@ import type { LightSource } from '../assets/types'
  * distance is an octagon, not a circle - that faceted edge is part of the
  * original's look, so it is baked into the gradient texture rather than
  * smoothed away.
+ *
+ * Two facts bound every radius the dynamic lights ask for. The buffer is
+ * 8-bit, so a light clamps at white and there is no blowout - the CRT
+ * filter's `glow` is what supplies bloom on top. And every shipped level saves
+ * `minLight` 35, so the buffer starts at 0.55 grey and a light has only 0.45
+ * of headroom: small and bright reads, large and dim does not. A tint can only
+ * withhold channels relative to white, so pale tints read as a warm or cold
+ * pool and saturated ones read as a gel.
  */
 
 /** Abuse works in 0..63 light units. */
@@ -125,7 +133,8 @@ export class LightLayer {
    */
   update(
     renderer: Renderer,
-    lights: LightSource[],
+    statics: readonly RenderLight[],
+    dynamics: readonly RenderLight[],
     minLight: number,
     cameraX: number,
     cameraY: number,
@@ -137,9 +146,37 @@ export class LightLayer {
     }
     this.overlay.visible = true
 
+    // Two lists rather than one concatenated one. A level carries around a
+    // hundred static lights and the weapons hand over a dynamic list on every
+    // frame they are firing; merging them here would allocate a hundred-entry
+    // array per frame for the sake of one loop.
+    let used = this.place(statics, 0, cameraX, cameraY, zoom)
+    used = this.place(dynamics, used, cameraX, cameraY, zoom)
+
+    for (let i = used; i < this.pool.length; i++) this.pool[i].visible = false
+    this.visible = used
+
+    // The buffer starts at the level's ambient floor; lights add on top and
+    // the 8-bit target clamps the sum, exactly like the engine's clamp to 63.
+    const ambient = Math.min(1, minLight / MAX_LIGHT)
+    renderer.render({
+      container: this.accumulator,
+      target: this.target,
+      clear: true,
+      clearColor: [ambient, ambient, ambient, 1],
+    })
+  }
+
+  /** Lays one list into the accumulator from `used` on; returns the new count. */
+  private place(
+    lights: readonly RenderLight[],
+    used: number,
+    cameraX: number,
+    cameraY: number,
+    zoom: number,
+  ): number {
     const viewW = this.width / zoom
     const viewH = this.height / zoom
-    let used = 0
 
     for (const light of lights) {
       const reachX = light.outer >> light.xshift
@@ -165,20 +202,14 @@ export class LightLayer {
       sprite.position.set((x - cameraX) * zoom, (y - cameraY) * zoom)
       sprite.width = w * zoom
       sprite.height = h * zoom
+      // Written every frame, not only when set: the pool hands the same sprite
+      // to a static light one frame and a tinted muzzle flash the next, and a
+      // left-over tint would stain the level's own lamps.
+      sprite.alpha = light.intensity ?? 1
+      sprite.tint = light.tint ?? 0xffffff
     }
 
-    for (let i = used; i < this.pool.length; i++) this.pool[i].visible = false
-    this.visible = used
-
-    // The buffer starts at the level's ambient floor; lights add on top and
-    // the 8-bit target clamps the sum, exactly like the engine's clamp to 63.
-    const ambient = Math.min(1, minLight / MAX_LIGHT)
-    renderer.render({
-      container: this.accumulator,
-      target: this.target,
-      clear: true,
-      clearColor: [ambient, ambient, ambient, 1],
-    })
+    return used
   }
 
   private take(index: number): Sprite {

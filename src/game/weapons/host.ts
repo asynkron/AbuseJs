@@ -6,6 +6,8 @@
  * who is hittable, how damage is applied, and how a sound gets played.
  */
 
+import type { BlastSource } from '../effects/types'
+import type { FlashOptions } from '../effects/lights'
 import type { ProjectileLevel, ProjectileOwner, ProjectileTarget } from './bmove'
 
 export interface ProjectileHost {
@@ -19,8 +21,21 @@ export interface ProjectileHost {
    */
   targets(): readonly ProjectileTarget[]
 
-  /** `do_damage(amount, victim, push_xvel, push_yvel)` - directed damage. */
-  damage(target: ProjectileTarget, amount: number, pushX: number, pushY: number): void
+  /**
+   * `do_damage(amount, victim, push_xvel, push_yvel)` - directed damage.
+   *
+   * `from` is the engine's own `from` argument, the thing credited with the
+   * hit. It used to be missing here, which meant a weapon kill could never
+   * colour its victim's body parts: `get_dead_part` reads exactly this and
+   * fell through to the plain set every time.
+   */
+  damage(
+    target: ProjectileTarget,
+    amount: number,
+    pushX: number,
+    pushY: number,
+    from?: BlastSource | null,
+  ): void
 
   /**
    * `hurt_radius(x, y, radius, amount, exclude, max_push)`. The falloff curve
@@ -33,6 +48,7 @@ export interface ProjectileHost {
     amount: number,
     exclude: ProjectileOwner | null,
     maxPush: number,
+    from?: BlastSource | null,
   ): void
 
   /** `(play_sound NAME 127 (x) (y))`, by the lisp symbol. */
@@ -46,10 +62,17 @@ export interface ProjectileHost {
   pointer(): { x: number; y: number } | null
 
   /**
-   * `(add_object EXP_LIGHT (x) (y) 100)` - a dynamic light of `outer` radius
-   * for `ticks` ticks. Optional: without it explosions simply do not flash.
+   * `(add_object EXP_LIGHT (x) (y) 100)` - a dynamic light of `outer` radius.
+   * Optional: without it explosions simply do not flash.
+   *
+   * The lifetime and the rest of the behaviour arrive in one object rather
+   * than as trailing positionals. They used to be a bare `ticks` argument, and
+   * the wiring in World.ts simply left it off - which TypeScript is happy to
+   * accept for a trailing parameter, so every weapon light silently ran for
+   * the default five ticks instead of the one or four it asked for. An object
+   * has to be actively discarded to lose it.
    */
-  addLight?(x: number, y: number, outer: number, ticks: number): void
+  addLight?(x: number, y: number, outer: number, options?: FlashOptions): void
 
   /**
    * `(frame_panic)` - "frames are being dropped, skip the cosmetics". Every

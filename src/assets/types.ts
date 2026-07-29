@@ -109,6 +109,23 @@ export interface LightSource {
   type: number
 }
 
+/**
+ * A light as the renderer takes it: a level light plus the two things a
+ * dynamic one needs.
+ *
+ * Invented, both fields. The engine has one light strength and no colour at
+ * all - `calc_light_value` (src/light.cpp) returns a scalar, and the only
+ * lights that ever move are EXP_LIGHT and QUICK_EXP_LIGHT, which are on or
+ * off. Level data carries neither, so a plain `LightSource` satisfies this as
+ * it stands and both lists can be drawn by the same loop.
+ */
+export interface RenderLight extends LightSource {
+  /** Scales the whole falloff, 0..1. Absent means full strength. */
+  readonly intensity?: number
+  /** Additive colour, 0xRRGGBB. Absent means white. */
+  readonly tint?: number
+}
+
 export interface LightingData {
   /** Ambient floor, 0..63. */
   minLight: number
