@@ -35,8 +35,14 @@ export interface BloodProfile {
  * Red for everything with a pulse, aliens included. It cannot collide with the
  * original's own red - `tint_palette`, the full-screen damage ramp - because
  * that is one of the things this port has not implemented.
+ *
+ * Deliberately dark for a fresh colour. A brighter red reads as pink or violet
+ * on screen rather than as blood, because these are one- and two-pixel marks
+ * and the CRT pass puts a bloom and a channel offset over everything: on a
+ * small bright element the fringe *is* the element. Keeping the whole ramp
+ * below half brightness leaves the bloom nothing to work with.
  */
-const BLOOD_RED: BloodProfile = { ramp: [0xd4232a, 0x8a1218, 0x3d0a0c], amount: 1 }
+const BLOOD_RED: BloodProfile = { ramp: [0x9e0f16, 0x5e0a10, 0x2a0508], amount: 1 }
 
 /** The ants proper: the only things in the game that already gib. */
 const ANT: BloodProfile = BLOOD_RED

@@ -53,8 +53,32 @@ const MAX_DROPLETS = 384
  */
 const MAX_DECALS = 256
 
-/** Sim ticks a droplet lives if it never hits anything. */
-const DROPLET_LIFE = 90
+/** Sim ticks a droplet lives if it never hits anything - a second and a bit. */
+const DROPLET_LIFE = 55
+
+/**
+ * How opaque one droplet and one mark are.
+ *
+ * Well under 1, and that is the whole trick: a single stain is faint and where
+ * blood lands on blood it builds up. At full opacity every mark is the same
+ * flat slab of colour and a dozen of them next to each other merge into one
+ * painted rectangle with no shape to it at all.
+ */
+const DROPLET_ALPHA = 0.8
+const MARK_ALPHA = 0.42
+
+/**
+ * One droplet in this many carries enough to leave a mark.
+ *
+ * A corpse throws about a hundred and thirty droplets. At one in three that is
+ * forty marks in one spot, which is not splatter - it is a puddle the size of
+ * the room. One in twelve leaves about a dozen, spread over wherever the spray
+ * actually reached.
+ */
+const HEAVY_IN = 12
+
+/** Engine ticks a mark lives in total: dry for two thirds, then fade out. */
+const MARK_LIFE = 210
 
 /**
  * The original's own fade granularity: `set_fade_count` runs 0..15
@@ -63,10 +87,9 @@ const DROPLET_LIFE = 90
  */
 const FADE_STEPS = 15
 /** Fraction of a droplet's life spent fading. */
-const FADE_TAIL = 0.35
+const FADE_TAIL = 0.5
 
-/** Engine ticks a mark spends at each step of the drying ramp. */
-const DRY_TICKS = 45
+
 
 /** Which face a droplet stopped against; picks the mark's shape. */
 type Surface = SplatShape
@@ -94,6 +117,8 @@ interface Decal {
   age: number
   /** How far down the ramp it has walked, 0..2. */
   step: number
+  /** Cleared when the fade runs out, so the slot can be skipped. */
+  live: boolean
 }
 
 export class Blood {
@@ -124,7 +149,7 @@ export class Blood {
    */
   burst(x: number, y: number, profile: BloodProfile | null): void {
     if (!profile || !this.enabled) return
-    const count = Math.round((20 + random(12)) * profile.amount)
+    const count = Math.round((14 + random(10)) * profile.amount)
     for (let i = 0; i < count; i++) {
       this.spawn(
         x,
@@ -156,7 +181,7 @@ export class Blood {
     if (!profile || !this.enabled) return
     this.mark(x, y, surface, profile.ramp)
 
-    const count = Math.round((5 + random(4)) * profile.amount)
+    const count = Math.round((3 + random(3)) * profile.amount)
     for (let i = 0; i < count; i++) {
       const away = surface === 'ceiling' ? 1 : -1
       this.spawn(x, y, (random(9) - 4) / 3, (away * (1 + random(6))) / 3, profile)
@@ -182,14 +207,30 @@ export class Blood {
     }
   }
 
-  /** One engine tick. Only the drying ramp is slow enough to belong here. */
+  /** One engine tick. Only the drying and the fade are slow enough to be here. */
   dry(): void {
     for (const decal of this.marks) {
-      if (decal.step >= 2) continue
-      if (++decal.age < DRY_TICKS) continue
-      decal.age = 0
-      decal.step++
-      decal.sprite.tint = decal.ramp[decal.step]
+      if (!decal.live) continue
+
+      // Two thirds of the life walking down the ramp from fresh to scab, then
+      // the last third fading off the floor entirely.
+      const dry = (MARK_LIFE * 2) / 3
+      if (++decal.age <= dry) {
+        const step = Math.min(2, Math.floor((decal.age / dry) * 3))
+        if (step !== decal.step) {
+          decal.step = step
+          decal.sprite.tint = decal.ramp[step]
+        }
+        continue
+      }
+
+      const left = 1 - (decal.age - dry) / (MARK_LIFE - dry)
+      if (left <= 0) {
+        decal.live = false
+        decal.sprite.visible = false
+        continue
+      }
+      decal.sprite.alpha = MARK_ALPHA * left
     }
   }
 
@@ -199,7 +240,7 @@ export class Blood {
       const x = Math.round(drop.prevX + (drop.x - drop.prevX) * alpha)
       const y = Math.round(drop.prevY + (drop.y - drop.prevY) * alpha)
       drop.sprite.position.set(x, y)
-      drop.sprite.alpha = this.fade(drop)
+      drop.sprite.alpha = DROPLET_ALPHA * this.fade(drop)
     }
   }
 
@@ -215,7 +256,9 @@ export class Blood {
   }
 
   get decalCount(): number {
-    return this.marks.length
+    let n = 0
+    for (const decal of this.marks) if (decal.live) n++
+    return n
   }
 
   /* ---------------------------------------------------------------- */
@@ -229,6 +272,7 @@ export class Blood {
     sprite.tint = profile.ramp[0]
     sprite.width = size
     sprite.height = size
+    sprite.alpha = DROPLET_ALPHA
     this.spray.addChild(sprite)
 
     this.live.push({
@@ -247,7 +291,7 @@ export class Blood {
       ramp: profile.ramp,
       age: 0,
       life: DROPLET_LIFE,
-      heavy: random(3) === 0,
+      heavy: random(HEAVY_IN) === 0,
     })
   }
 
@@ -290,7 +334,7 @@ export class Blood {
 
     let decal = this.marks[this.next]
     if (!decal) {
-      decal = { sprite: new Sprite(), ramp: [0, 0, 0], age: 0, step: 0 }
+      decal = { sprite: new Sprite(), ramp: [0, 0, 0], age: 0, step: 0, live: true }
       this.marks[this.next] = decal
       this.decals.addChild(decal.sprite)
     }
@@ -298,6 +342,9 @@ export class Blood {
     decal.ramp = ramp
     decal.age = 0
     decal.step = 0
+    decal.live = true
+    decal.sprite.visible = true
+    decal.sprite.alpha = MARK_ALPHA
     decal.sprite.texture = frame
     decal.sprite.tint = ramp[0]
     // Mirrored, never rotated: a flipped mask is still on the pixel grid and a

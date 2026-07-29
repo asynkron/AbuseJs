@@ -36,11 +36,13 @@ const TEXTURE_SIZE = 2
 
 /**
  * Invented, and in the spirit of Particles.POOL_LIMIT and the gib pool's 40. A
- * rocket in flight carries about 55, a big blast throws 80; six hundred is
- * three simultaneous catastrophes. Over the cap the *oldest* mote is recycled
+ * rocket in flight carries about 55 and a `huge` blast throws 143, so this is
+ * roughly a hidden-wall chain going off with two rockets already in the air.
+ * They batch into one draw call and only the debris class does any collision
+ * work, so the ceiling is generous. Over it the *oldest* mote is recycled
  * rather than the new one refused, so a fresh explosion always reads.
  */
-const MAX_MOTES = 600
+const MAX_MOTES = 1000
 
 /**
  * Steps in the colour and alpha ramps.

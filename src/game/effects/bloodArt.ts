@@ -78,8 +78,8 @@ function drawPuddle(
 ): void {
   const cx = CELL_W / 2
   const cy = CELL_H / 2
-  const halfW = 4 + Math.floor(rng() * 6)
-  const halfH = 2 + Math.floor(rng() * 2)
+  const halfW = 3 + Math.floor(rng() * 4)
+  const halfH = 1 + Math.floor(rng() * 2)
 
   for (let x = -halfW; x <= halfW; x++) {
     // A half-ellipse, roughened by up to a pixel either way so the outline is
@@ -91,8 +91,8 @@ function drawPuddle(
 
   const speckles = 1 + Math.floor(rng() * 3)
   for (let i = 0; i < speckles; i++) {
-    const sx = cx + Math.round((rng() * 2 - 1) * (halfW + 6))
-    const sy = cy + Math.round((rng() * 2 - 1) * (halfH + 4))
+    const sx = cx + Math.round((rng() * 2 - 1) * (halfW + 4))
+    const sy = cy + Math.round((rng() * 2 - 1) * (halfH + 3))
     plot(data, width, cellX, cellY, sx, sy)
     if (rng() < 0.5) plot(data, width, cellX, cellY, sx + 1, sy)
   }
@@ -108,17 +108,17 @@ function drawDrip(
 ): void {
   const cx = CELL_W / 2
   const top = CELL_H / 2 - 3
-  const halfW = 4 + Math.floor(rng() * 4)
+  const halfW = 3 + Math.floor(rng() * 3)
 
   for (let x = -halfW; x <= halfW; x++) {
-    const span = Math.round(2 * Math.sqrt(Math.max(0, 1 - (x / halfW) ** 2)))
+    const span = Math.round(1.5 * Math.sqrt(Math.max(0, 1 - (x / halfW) ** 2)))
     for (let y = 0; y <= span; y++) plot(data, width, cellX, cellY, cx + x, top + y)
   }
 
   const drips = 2 + Math.floor(rng() * 2)
   for (let i = 0; i < drips; i++) {
     const dx = cx + Math.round((rng() * 2 - 1) * halfW)
-    const length = 3 + Math.floor(rng() * 6)
+    const length = 2 + Math.floor(rng() * 4)
     for (let y = 0; y < length; y++) plot(data, width, cellX, cellY, dx, top + 2 + y)
     plot(data, width, cellX, cellY, dx, top + 2 + length)
     plot(data, width, cellX, cellY, dx + 1, top + 2 + length)
@@ -135,14 +135,14 @@ function drawRun(
 ): void {
   const cx = CELL_W / 2
   const cy = CELL_H / 2 - 5
-  const halfH = 3 + Math.floor(rng() * 3)
+  const halfH = 2 + Math.floor(rng() * 3)
 
   for (let y = -halfH; y <= halfH; y++) {
-    const span = Math.round(3 * Math.sqrt(Math.max(0, 1 - (y / halfH) ** 2)))
+    const span = Math.round(2 * Math.sqrt(Math.max(0, 1 - (y / halfH) ** 2)))
     for (let x = -span; x <= span; x++) plot(data, width, cellX, cellY, cx + x, cy + y)
   }
 
-  const length = 6 + Math.floor(rng() * 10)
+  const length = 4 + Math.floor(rng() * 7)
   for (let y = 0; y < length; y++) {
     plot(data, width, cellX, cellY, cx, cy + halfH + y)
     if (rng() < 0.35) plot(data, width, cellX, cellY, cx + 1, cy + halfH + y)
