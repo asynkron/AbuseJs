@@ -823,6 +823,13 @@ export class World {
   private pushOutOfBlockers(): void {
     const player = this.player
 
+    // A climbing cop passes through everything - `climb_handler` uses `set_y`
+    // with no collision test at all - so nothing may push him out of anything.
+    // This was the last of three places writing his position back after the
+    // ladder had moved him, which pinned him mid-shaft and read as a ladder
+    // that would not climb past a platform.
+    if (player.isClimbing) return
+
     for (const solid of this.solidObjects()) {
       const box = solid.hitBox
       const left = player.x - player.halfWidth
@@ -1324,8 +1331,17 @@ class PlayerFocus implements LogicFocus {
     moveAndCollide(this.level, this.player, dx, dy)
   }
 
-  /** `set_y` - raw placement, which is how a lift takes you aboard. */
+  /**
+   * `set_y` - raw placement, which is how a lift takes you aboard.
+   *
+   * Refused while the cop is on a ladder. `player_move` dispatches to
+   * `climb_handler` *instead of* the mover, so a ladder owns the tick outright;
+   * letting a platform write his position back afterwards pinned him in place
+   * three pixels below where he had just climbed to, every tick, and looked
+   * exactly like the ladder itself was broken.
+   */
   setFeetY(y: number): void {
+    if (this.player.isClimbing) return
     this.player.y = y
     this.player.landOn(y)
   }
@@ -1364,6 +1380,8 @@ class CopPowerHost {
   }
 
   set y(value: number) {
+    // See setFeetY - a climbing cop is not the mover's to move.
+    if (this.player.isClimbing) return
     this.player.y = value
   }
 
