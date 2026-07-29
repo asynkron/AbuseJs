@@ -333,7 +333,7 @@ async function start() {
                 : `${audio.loadedCount} clips, ${world.ambientCount} emitters, music ${music.track ?? 'none'}`
             }`,
           world.objectSummary,
-          `arrows/WASD move   space jump   shift run   E use (${world.exitCount} exits)` +
+          `arrows/WASD move   space jump   shift run   down/E use (${world.exitCount} exits)` +
             `   V crt:${crtEnabled ? 'on' : 'off'}   L light:${world.lights.enabled ? 'on' : 'off'}`,
         ].join('\n')
       }

@@ -16,6 +16,9 @@ const BINDINGS: Record<string, keyof InputState> = {
   KeyD: 'right',
   ArrowUp: 'up',
   KeyW: 'up',
+  // Down is the original's action key - `pressing_action_key` in
+  // lisp/people.lsp is literally `(> (player_y_suggest) 0)`, which is why the
+  // tutorial text says "press the down key to activate objects".
   ArrowDown: 'down',
   KeyS: 'down',
   Space: 'jump',

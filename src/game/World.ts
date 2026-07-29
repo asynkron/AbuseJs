@@ -142,7 +142,8 @@ export class World {
     this.ambience.update(this.player.x, this.player.y)
     this.messages.update(this.player.x, this.player.y)
 
-    if (input.state.action) this.checkExits()
+    // Down is the original's action key; E/Enter are kept as alternates.
+    if (input.state.action || input.state.down) this.checkExits()
   }
 
   /** Standing on an exit with the action key held requests the next level. */
