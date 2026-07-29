@@ -11,7 +11,7 @@ import { LightLayer } from '../render/LightLayer'
 import { StatusBar } from '../render/StatusBar'
 import { TileLayer } from '../render/TileLayer'
 import { PlayerCombatant, PropCombatant, type Combatant } from './combat'
-import { isBlocked, isGrounded, moveAndCollide } from './collision'
+import { isBlocked, isGrounded, moveAndCollide, type Body } from './collision'
 import { EffectsSystem, gibFlavourFor, hurtRadius, type BlastSource } from './effects/index'
 import { speed } from './enemies/tuning'
 import { buildEnemies, type EnemyGroup, type EnemyShot, type EnemySound } from './enemies/index'
@@ -1291,7 +1291,7 @@ export class World {
       height: this.player.height,
     }
 
-    for (let i = 0; i < 64 && isBlocked(this.level, probe); i++) probe.y -= 4
+    probe.y = clearSpawnY(this.level, probe)
     for (let i = 0; i < 400 && !isGrounded(this.level, probe); i++) {
       probe.y += 2
       if (isBlocked(this.level, probe)) {
@@ -1313,6 +1313,43 @@ export class World {
       .map(([type, n]) => `${type}x${n}`)
       .join(' ')
   }
+}
+
+/** How far from the marker to look for room, and in what steps. */
+const SPAWN_SEARCH_REACH = 256
+const SPAWN_SEARCH_STEP = 4
+
+/**
+ * The nearest y to the marker's own where the cop actually fits.
+ *
+ * START markers sit wherever the level editor dropped them, which is not
+ * always somewhere a 28px body fits: level03's hangs in a 45px shaft with the
+ * cop's head a row into the ceiling, and the original does not care because it
+ * inserts him regardless and lets him fall. Ours has to place a box, so it
+ * looks outwards - down before up at equal distance, because a marker that
+ * does not fit is hanging over the floor it belongs on.
+ *
+ * Searching upwards only, which is what this used to do, walked the cop
+ * straight out through the top of the map on level03. Outside the map reads as
+ * solid rock, so every step up stayed blocked, and he ended the search 256px
+ * above the level, standing in nothing.
+ */
+function clearSpawnY(level: Level, probe: Body): number {
+  const origin = probe.y
+  if (!isBlocked(level, probe)) return origin
+
+  for (let offset = SPAWN_SEARCH_STEP; offset <= SPAWN_SEARCH_REACH; offset += SPAWN_SEARCH_STEP) {
+    for (const y of [origin + offset, origin - offset]) {
+      if (y < 0 || y > level.heightPx) continue
+      probe.y = y
+      if (!isBlocked(level, probe)) return y
+    }
+  }
+
+  // Nothing clear within reach. Leave him on the marker rather than somewhere
+  // arbitrary - buried in the level he can at least walk out of it.
+  probe.y = origin
+  return origin
 }
 
 /**
