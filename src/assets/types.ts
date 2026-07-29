@@ -115,6 +115,8 @@ export interface LevelData {
   bgScroll: { xmul: number; xdiv: number; ymul: number; ydiv: number }
   lighting: LightingData
   objects: LevelObjectData[]
+  /** Per object, the indices of the objects it is wired to. */
+  links: number[][]
 }
 
 export interface LevelIndexEntry {

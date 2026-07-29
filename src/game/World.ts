@@ -10,6 +10,7 @@ import { LightLayer } from '../render/LightLayer'
 import { TileLayer } from '../render/TileLayer'
 import { Level } from './Level'
 import { Player } from './Player'
+import { buildPlatforms, type Platform } from './Platform'
 import { spawnProps, type Prop } from './Prop'
 import { StatusBar } from '../render/StatusBar'
 import { TrainMessages } from './TrainMessages'
@@ -18,6 +19,9 @@ import { isBlocked, isGrounded } from './collision'
 /** How close the player must stand to an exit portal to use it. */
 const EXIT_REACH_X = 20
 const EXIT_REACH_Y = 40
+
+/** How far below a platform's surface the player still counts as landing on it. */
+const PLATFORM_GRAB = 12
 
 /**
  * Owns a loaded level and everything drawn in it.
@@ -36,6 +40,9 @@ export class World {
 
   /** Level objects, drawn behind the player. */
   private readonly props: Prop[]
+  private readonly platforms: Platform[]
+  /** The platform the player is standing on, so it can carry them. */
+  private riding: Platform | null = null
   private visibleProps = 0
 
   private readonly bgTiles: TileLayer
@@ -92,7 +99,10 @@ export class World {
     this.root.addChild(this.backdrop, this.scene)
 
     this.props = spawnProps(assets, level.objects)
-    for (const prop of this.props) {
+    // Platforms take over from the inert props the level spawned for them.
+    this.platforms = buildPlatforms(assets, level.objects, level.links, this.props)
+
+    for (const prop of [...this.props, ...this.platforms]) {
       this.propLayer.addChild(prop.sprite)
       if (prop.character === 'NEXT_LEVEL') this.exits.push(prop)
     }
@@ -131,7 +141,17 @@ export class World {
       )
     }
 
+    // Platforms move first, then carry their rider, then the player's own
+    // physics runs on top of that.
+    for (const platform of this.platforms) platform.update()
+    if (this.riding) {
+      this.player.x += this.riding.deltaX
+      this.player.y += this.riding.deltaY
+    }
+
     this.player.update(input.state, input.consumeJump())
+    this.ridePlatforms(input.state.action || input.state.down)
+
     this.camera.follow(this.player.x, this.player.y - this.player.height / 2, {
       width: this.level.widthPx,
       height: this.level.heightPx,
@@ -144,6 +164,32 @@ export class World {
 
     // Down is the original's action key; E/Enter are kept as alternates.
     if (input.state.action || input.state.down) this.checkExits()
+  }
+
+  /**
+   * Lands the player on any platform they are falling onto, and sends that
+   * platform on its way if they press the action key while standing there.
+   */
+  private ridePlatforms(activating: boolean): void {
+    this.riding = null
+
+    for (const platform of this.platforms) {
+      const { left, right, y } = platform.surface
+      if (this.player.x < left || this.player.x > right) continue
+
+      // Land only when coming down onto it, within a small band, so you can
+      // still jump up through one.
+      const distance = y - this.player.y
+      if (this.player.vy < 0 || distance > 1 || distance < -PLATFORM_GRAB) continue
+
+      this.player.y = y
+      this.player.vy = 0
+      this.player.onGround = true
+      this.riding = platform
+
+      if (activating) platform.trigger()
+      return
+    }
   }
 
   /** Standing on an exit with the action key held requests the next level. */
@@ -213,7 +259,7 @@ export class World {
     const bottom = cameraY + viewH + margin
 
     let visible = 0
-    for (const prop of this.props) {
+    for (const prop of [...this.props, ...this.platforms]) {
       if (prop.x < left || prop.x > right || prop.y < top || prop.y > bottom) {
         prop.sprite.visible = false
         continue
@@ -236,7 +282,12 @@ export class World {
   }
 
   get propCounts(): { visible: number; total: number } {
-    return { visible: this.visibleProps, total: this.props.length }
+    return { visible: this.visibleProps, total: this.props.length + this.platforms.length }
+  }
+
+  get platformStatus(): string {
+    const moving = this.platforms.filter((p) => p.isMoving).length
+    return `${this.platforms.length} platforms${moving ? ` (${moving} moving)` : ''}${this.riding ? ' riding' : ''}`
   }
 
   get ambientCount(): number {

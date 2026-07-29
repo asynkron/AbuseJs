@@ -94,6 +94,11 @@ export class Level {
     return this.data.lighting ?? { minLight: 63, lights: [] }
   }
 
+  /** Per object, the indices of the objects it is wired to. */
+  get links(): number[][] {
+    return this.data.links ?? []
+  }
+
   /** Raw foreground cell, flags included. Out of bounds reads as solid rock. */
   fgCell(cx: number, cy: number): number {
     if (cx < 0 || cy < 0 || cx >= this.fgWidth || cy >= this.fgHeight) return -1

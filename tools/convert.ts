@@ -24,6 +24,7 @@ import {
   readTaggedArray,
   readNameList,
   readLightList,
+  RC_32,
   SpecType,
   type PalettizedImage,
   type SpecFile,
@@ -744,6 +745,7 @@ function readLevel(spec: SpecFile, buf: Buffer, id: string) {
   }
 
   const objects = readObjects(spec, buf)
+  const links = readObjectLinks(spec, buf, objects.length)
 
   const lightEntry = spec.byName.get('lights')
   const lighting = lightEntry
@@ -758,7 +760,44 @@ function readLevel(spec: SpecFile, buf: Buffer, id: string) {
     bgScroll,
     lighting,
     objects,
+    links,
   }
+}
+
+/**
+ * The wiring between objects: which markers a platform travels between, which
+ * switch drives it, and so on (src/level.cpp, load_links).
+ *
+ * Stored as `u8 RC_32, u32 count, count x (u32 owner, i32 target)`.
+ *
+ * Both indices are **1-based** - `write_links` in src/level.cpp counts from
+ * `int x = 1`, and `object_to_number_in_list` reserves 0 for "not found".
+ * Reading them as 0-based produces a link graph that looks plausible and is
+ * entirely wrong. A negative target indexes the player list instead; those are
+ * dropped, since we have exactly one player.
+ */
+function readObjectLinks(spec: SpecFile, buf: Buffer, objectCount: number): number[][] {
+  const links: number[][] = Array.from({ length: objectCount }, () => [])
+  const entry = spec.byName.get('object_links')
+  if (!entry) return links
+
+  let p = entry.offset
+  if (buf.readUInt8(p) !== RC_32) return links
+  p += 1
+
+  const count = buf.readUInt32LE(p)
+  p += 4
+  if (count > 100000) return links
+
+  for (let i = 0; i < count && p + 8 <= buf.length; i++, p += 8) {
+    const owner = buf.readUInt32LE(p) - 1
+    const target = buf.readInt32LE(p + 4) - 1
+    if (owner < 0 || owner >= objectCount) continue
+    if (target < 0 || target >= objectCount) continue
+    links[owner].push(target)
+  }
+
+  return links
 }
 
 interface LevelObject {

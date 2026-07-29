@@ -326,7 +326,7 @@ async function start() {
             `${world.player.onGround ? '' : ' (air)'}  x${zoom}  ${fps}fps  ${world.spriteCount} sprites` +
             `  ${world.lights.visibleCount}/${level.lighting.lights.length} lights` +
             ` @ambient ${level.lighting.minLight}/63`,
-          `props ${world.propCounts.visible}/${world.propCounts.total} drawn` +
+          `props ${world.propCounts.visible}/${world.propCounts.total} drawn   ${world.platformStatus}` +
             `   audio ${
               audio.muted
                 ? 'muted'
