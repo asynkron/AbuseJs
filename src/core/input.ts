@@ -7,8 +7,14 @@ export interface InputState {
   run: boolean
   /** Use / enter - the original's "action key". */
   action: boolean
-  /** Left mouse button. */
+  /** Left mouse button, or its keyboard equivalent. */
   fire: boolean
+  /**
+   * The original's secondary action - "hold down the right mouse button to use
+   * special powers". Nothing uses it yet, but it is bound so a trackpad is
+   * never the thing standing in the way.
+   */
+  special: boolean
 }
 
 const BINDINGS: Record<string, keyof InputState> = {
@@ -28,6 +34,12 @@ const BINDINGS: Record<string, keyof InputState> = {
   ShiftRight: 'run',
   KeyE: 'action',
   Enter: 'action',
+  // Mac trackpads have no second button, and holding a click for sustained
+  // fire is miserable, so both mouse actions have keys of their own.
+  KeyX: 'fire',
+  Slash: 'fire',
+  KeyC: 'special',
+  Period: 'special',
 }
 
 export class Input {
@@ -40,6 +52,7 @@ export class Input {
     run: false,
     action: false,
     fire: false,
+    special: false,
   }
 
   /** Latest pointer position in CSS pixels, for aiming. */
@@ -61,13 +74,18 @@ export class Input {
       this.pointer.seen = true
     })
     window.addEventListener('pointerdown', (e) => {
-      // Left button only; the panel's sliders live on the same surface.
-      if (e.button === 0 && !(e.target as HTMLElement)?.closest?.('#controls')) {
-        this.state.fire = true
-      }
+      // The panel's sliders live on the same surface; leave those alone.
+      if ((e.target as HTMLElement)?.closest?.('#controls')) return
+      if (e.button === 0) this.state.fire = true
+      if (e.button === 2) this.state.special = true
     })
     window.addEventListener('pointerup', (e) => {
       if (e.button === 0) this.state.fire = false
+      if (e.button === 2) this.state.special = false
+    })
+    // A two-finger tap would otherwise drop a context menu over the game.
+    window.addEventListener('contextmenu', (e) => {
+      if (!(e.target as HTMLElement)?.closest?.('#controls')) e.preventDefault()
     })
   }
 
