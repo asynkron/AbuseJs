@@ -32,11 +32,11 @@ export class StatusBar {
   private readonly panel = new Sprite()
   private readonly healthDigits: Sprite[] = []
   private readonly weaponIcons: Sprite[] = []
+  private lastWeaponKey = ''
   private readonly ammoDigits: Sprite[][] = []
 
   private panelHeight = 32
   private lastHealth = -1
-  private lastAmmo = -1
 
   constructor(private readonly assets: GameAssets) {
     const sbar = assets.imageTexture('art/statbar.spe#sbar')
@@ -84,29 +84,39 @@ export class StatusBar {
   }
 
   /**
-   * Shows the machine gun in slot 0 with its ammo count. The original lights
-   * the selected weapon's icon (`bweap`) and dims the rest (`dweap`); there is
-   * only one weapon so far, so it is always the lit one.
+   * Draws every weapon slot: the one in hand lit (`bweap`), the rest you are
+   * carrying dimmed (`dweap`), and slots you have nothing for left blank.
+   * Each shows its own magazine.
    */
-  setWeapon(ammo: number): void {
-    const icon = this.weaponIcons[0]
-    if (icon) {
-      const texture = this.assets.imageTexture('art/statbar.spe#bweap0001.pcx')
-      if (texture) {
-        icon.texture = texture
-        icon.visible = true
+  setWeapon(selected: number, magazines: readonly number[]): void {
+    const key = `${selected}:${magazines.join(',')}`
+    if (key === this.lastWeaponKey) return
+    this.lastWeaponKey = key
+
+    this.weaponIcons.forEach((icon, slot) => {
+      // Slot 0 is the machine gun, which the cop always carries, so it stays
+      // on the panel at zero rounds.
+      const carried = slot === 0 || (magazines[slot] ?? 0) > 0
+      if (!carried) {
+        icon.visible = false
+        this.ammoDigits[slot]?.forEach((d) => (d.visible = false))
+        return
       }
-    }
 
-    const clamped = Math.max(0, Math.min(999, Math.round(ammo)))
-    if (clamped === this.lastAmmo) return
-    this.lastAmmo = clamped
+      const set = slot === selected ? 'bweap' : 'dweap'
+      const texture = this.assets.imageTexture(
+        `art/statbar.spe#${set}${String(slot + 1).padStart(4, '0')}.pcx`,
+      )
+      icon.visible = texture !== null
+      if (texture) icon.texture = texture
 
-    const text = String(clamped).padStart(3, '0')
-    this.ammoDigits[0]?.forEach((sprite, i) => {
-      const texture = this.digitTexture(Number(text[i]), true)
-      if (texture) sprite.texture = texture
-      sprite.visible = texture !== null
+      const text = String(Math.max(0, Math.min(999, Math.round(magazines[slot] ?? 0))))
+        .padStart(3, '0')
+      this.ammoDigits[slot]?.forEach((sprite, i) => {
+        const digit = this.digitTexture(Number(text[i]), true)
+        if (digit) sprite.texture = digit
+        sprite.visible = digit !== null
+      })
     })
   }
 

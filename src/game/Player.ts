@@ -4,6 +4,7 @@ import type { Frame, GameAssets } from '../assets/loader'
 import type { InputState } from '../core/input'
 import { Entity } from './Entity'
 import { Level } from './Level'
+import { POWER_CHARGE, WEAPONS, type PowerKind, type WeaponDef } from './Weapons'
 import { isGrounded, moveAndCollide } from './collision'
 
 /**
@@ -63,8 +64,14 @@ const MUZZLE_OFFSETS: readonly (readonly [number, number])[] = [
  * `laser_ufun`), which is what "collect ammo to increase firing speed" in the
  * tutorial is telling you.
  */
-const FIRE_DELAY = 3
 const FIRE_DELAY_DRY = 7
+/** A weapon swap costs a beat, so cycling is not a free rate-of-fire boost. */
+const WEAPON_SWITCH_DELAY = 8
+/** How fast FLY climbs and sinks. */
+const FLY_SPEED = 2.2
+/** HEAL restores one point every this many ticks while held. */
+const HEAL_EVERY = 8
+const MAX_HEALTH = 100
 /** Rounds the cop starts a level with. */
 const STARTING_AMMO = 50
 /** Ticks of invulnerability after being hit, so one turret cannot chain-kill. */
@@ -81,11 +88,35 @@ export class Player extends Entity {
   aimAngle = 0
   /** Nothing damages the player yet; this is what the status bar shows. */
   health: number
-  /** Machine gun rounds. Firing dry still works, just far slower. */
-  ammo = STARTING_AMMO
+  /** Rounds per weapon slot. Firing dry still works, just far slower. */
+  readonly magazines: number[] = WEAPONS.map((_, i) => (i === 0 ? STARTING_AMMO : 0))
+  /** Which of `WEAPONS` is in hand. */
+  weapon = 0
+
+  /** The power the special button spends, and how much of it is left. */
+  power: PowerKind | null = null
+  powerCharge = 0
+  /** True on ticks the special is actually running, for everything that reads it. */
+  powerActive = false
 
   private invulnerable = 0
   private deathTimer = 0
+  private healTick = 0
+  /** Torso frames per weapon, resolved once. */
+  private readonly topsByWeapon: Frame[][] = []
+
+  private get topFrames(): Frame[] {
+    return this.topsByWeapon[this.weapon] ?? this.topsByWeapon[0] ?? []
+  }
+
+  /** Rounds for the weapon in hand. */
+  get ammo(): number {
+    return this.magazines[this.weapon]
+  }
+
+  get weaponDef(): WeaponDef {
+    return WEAPONS[this.weapon]
+  }
 
   get isDead(): boolean {
     return this.deathTimer > 0
@@ -96,7 +127,6 @@ export class Player extends Entity {
     return this.invulnerable > 0
   }
 
-  private readonly topFrames: Frame[]
   private coyote = 0
   private jumpBuffer = 0
   private fireCooldown = 0
@@ -110,7 +140,12 @@ export class Player extends Entity {
     super(assets, 'DARNEL')
     this.halfWidth = 7
     this.height = 28
-    this.topFrames = assets.animation(TOP_CHARACTER, 'stopped')
+    // One torso per weapon, so the cop is visibly holding what he fires. Two
+    // weapons never got their own and fall back to the machine gun's.
+    for (const weapon of WEAPONS) {
+      const frames = assets.animation(weapon.top, 'stopped')
+      this.topsByWeapon.push(frames.length ? frames : assets.animation(TOP_CHARACTER, 'stopped'))
+    }
     this.health = assets.ability('DARNEL', 'start_hp') ?? 100
   }
 
@@ -171,7 +206,22 @@ export class Player extends Entity {
       this.jumpCutArmed = false
     }
 
-    this.vy = Math.min(this.vy + PHYSICS.gravity, PHYSICS.maxFall)
+    if (this.powerActive && this.power === 'fly') {
+      // FLY is a hover, not a jetpack: up climbs, down sinks, and letting go
+      // of both simply holds height.
+      const climb = (input.up ? -1 : 0) + (input.down ? 1 : 0)
+      this.vy = climb * FLY_SPEED
+    } else {
+      this.vy = Math.min(this.vy + PHYSICS.gravity, PHYSICS.maxFall)
+    }
+
+    if (this.powerActive && this.power === 'health' && this.health < MAX_HEALTH) {
+      this.healTick++
+      if (this.healTick >= HEAL_EVERY) {
+        this.healTick = 0
+        this.health = Math.min(MAX_HEALTH, this.health + 1)
+      }
+    }
 
     const result = moveAndCollide(this.level, this, this.vx, this.vy)
     if (result.hitWall) this.vx = 0
@@ -234,7 +284,8 @@ export class Player extends Entity {
     this.vx = 0
     this.vy = 0
     this.health = this.assets.ability('DARNEL', 'start_hp') ?? 100
-    this.ammo = STARTING_AMMO
+    // Ammo survives a death; only the machine gun is topped back up.
+    this.magazines[0] = Math.max(this.magazines[0], STARTING_AMMO)
     this.deathTimer = 0
     this.invulnerable = HURT_INVULNERABLE
     this.setState('stopped', true)
@@ -321,18 +372,95 @@ export class Player extends Entity {
   }
 
   /**
-   * Consumes a shot if the gun is ready. Returns the muzzle and the angle to
-   * fire along, or null while cooling down.
+   * Picks a weapon slot. Slots you have no ammo for are refused - the machine
+   * gun is the exception, since the cop always has that one.
    */
-  tryFire(wantsToFire: boolean): { x: number; y: number; angle: number } | null {
+  selectWeapon(slot: number): boolean {
+    if (slot < 0 || slot >= WEAPONS.length) return false
+    if (slot !== 0 && this.magazines[slot] <= 0) return false
+    if (slot === this.weapon) return false
+    this.weapon = slot
+    this.fireCooldown = Math.max(this.fireCooldown, WEAPON_SWITCH_DELAY)
+    return true
+  }
+
+  /** Steps to the next slot that has something in it, in either direction. */
+  cycleWeapon(step: number): boolean {
+    const n = WEAPONS.length
+    for (let i = 1; i <= n; i++) {
+      const slot = (((this.weapon + step * i) % n) + n) % n
+      if (slot === 0 || this.magazines[slot] > 0) return this.selectWeapon(slot)
+    }
+    return false
+  }
+
+  /** Takes on a power, replacing whatever was held. */
+  givePower(kind: PowerKind): void {
+    this.power = kind
+    this.powerCharge = POWER_CHARGE
+  }
+
+  /**
+   * Runs the special. It is held, not toggled - the charge only drains while
+   * the button is down, which is what "hold down the right mouse button" in
+   * the tutorial means.
+   */
+  updatePower(wants: boolean): void {
+    this.powerActive = false
+    if (!wants || !this.power || this.powerCharge <= 0 || this.isDead) return
+
+    this.powerActive = true
+    if (--this.powerCharge <= 0) {
+      this.powerCharge = 0
+      this.power = null
+    }
+  }
+
+  /**
+   * Consumes a shot if the gun is ready. Returns the muzzle and one angle per
+   * tracer the weapon throws, or null while cooling down.
+   */
+  tryFire(wantsToFire: boolean): { x: number; y: number; angles: number[] } | null {
     if (this.fireCooldown > 0) this.fireCooldown--
     if (!wantsToFire || this.fireCooldown > 0) return null
 
-    const dry = this.ammo <= 0
-    this.fireCooldown = dry ? FIRE_DELAY_DRY : FIRE_DELAY
-    if (!dry) this.ammo--
+    const weapon = this.weaponDef
+    const dry = this.magazines[this.weapon] <= 0
+    // Out of ammo the gun does not stop, it labours - which is what "collect
+    // ammo to increase firing speed" is telling you. FAST halves the wait.
+    const delay = dry ? FIRE_DELAY_DRY : weapon.delay
+    this.fireCooldown = Math.max(1, Math.round(this.powerFast ? delay / 2 : delay))
+
+    if (dry) {
+      // Only the machine gun will fire on an empty magazine; the rest are
+      // simply not there to be fired.
+      if (this.weapon !== 0) return null
+    } else {
+      this.magazines[this.weapon] = Math.max(0, this.magazines[this.weapon] - weapon.cost)
+    }
+
+    const angles: number[] = []
+    const shots = dry ? 1 : weapon.shots
+    for (let i = 0; i < shots; i++) {
+      // Spread fans symmetrically about the aim; a single shot sits dead on it.
+      const t = shots === 1 ? 0 : (i / (shots - 1)) * 2 - 1
+      angles.push(this.aimAngle + t * weapon.spread)
+    }
 
     const { x, y } = this.muzzle
-    return { x, y, angle: this.aimAngle }
+    return { x, y, angles }
+  }
+
+  /** True while the FAST power is running. */
+  get powerFast(): boolean {
+    return this.powerActive && this.power === 'fast'
+  }
+
+  /**
+   * True while SNEAKY is running. It does not turn off a fight already in
+   * progress - it stops anything from noticing you in the first place.
+   */
+  get powerSneaky(): boolean {
+    return this.powerActive && this.power === 'sneaky'
   }
 }

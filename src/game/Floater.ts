@@ -71,7 +71,7 @@ export class Floater extends Prop {
     return killed
   }
 
-  update(playerX: number, playerY: number): void {
+  update(playerX: number, playerY: number, unseen = false): void {
     if (this.touchTimer > 0) this.touchTimer--
 
     this.bob = (this.bob + 1) % BOB_PERIOD
@@ -92,7 +92,7 @@ export class Floater extends Prop {
         break
 
       case 'drifting': {
-        const chasing = Math.hypot(playerX - this.x, playerY - this.y) < CHASE_REACH
+        const chasing = !unseen && Math.hypot(playerX - this.x, playerY - this.y) < CHASE_REACH
         if (chasing) this.direction = playerX < this.x ? -1 : 1
 
         const speed = chasing ? CHASE_SPEED : DRIFT_SPEED

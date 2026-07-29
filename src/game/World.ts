@@ -18,24 +18,17 @@ import { buildTeleporters, type Teleporter } from './Teleporter'
 import { buildTurrets, type Turret } from './Turret'
 import { buildCeilingAnts, type CeilingAnt } from './CeilingAnt'
 import { buildFloaters, type Floater } from './Floater'
+import { ammoPickup, POWERS } from './Weapons'
 import { Effects } from './Effects'
 import { StatusBar } from '../render/StatusBar'
 import { TrainMessages } from './TrainMessages'
 import { isBlocked, isGrounded } from './collision'
 
-/** Damage one machine gun round does, from `do_damage 5` in weapons.lsp. */
-const BULLET_DAMAGE = 5
 /** What a turret's shot takes off the player. */
 const ENEMY_BULLET_DAMAGE = 6
 /** Enemy tracers are red, so incoming fire reads at a glance. */
 const ENEMY_TRACER = 0xff6a4a
 
-/**
- * Ammo pickups name their own amount: MBULLET_ICON20 is twenty rounds,
- * ROCKET_ICON2 is two. Only the machine gun exists, so everything tops up the
- * same pool for now.
- */
-const AMMO_ICON = /_ICON(\d+)$/
 /** What a HEALTH pickup restores. */
 const HEALTH_PICKUP = 15
 const MAX_HEALTH = 100
@@ -213,6 +206,12 @@ export class World {
     this.player.update(input.state, input.consumeJump())
     this.ridePlatforms(activating)
     this.useTeleporters(activating)
+    const slot = input.consumeWeapon()
+    if (slot !== null) this.player.selectWeapon(slot)
+    const step = input.consumeWeaponStep()
+    if (step) this.player.cycleWeapon(step > 0 ? 1 : -1)
+
+    this.player.updatePower(input.state.special)
     this.fireWeapon(input.state.fire)
 
     this.signals.update(this.player.x, this.player.y)
@@ -279,8 +278,10 @@ export class World {
   private updateEnemies(): void {
     const player = this.player
 
+    const unseen = player.powerSneaky
+
     for (const turret of this.turrets) {
-      turret.update(player.x, player.y)
+      turret.update(player.x, player.y, unseen)
       const shot = turret.takeShot()
       if (!shot) continue
       this.enemyBullets.spawn(shot.x, shot.y, shot.angle, ENEMY_TRACER)
@@ -289,7 +290,7 @@ export class World {
 
     for (const ant of this.ants) {
       if (ant.isDying || ant.isDead) continue
-      ant.update(player.x, player.y)
+      ant.update(player.x, player.y, unseen)
 
       const shot = ant.takeShot()
       if (shot) {
@@ -303,7 +304,7 @@ export class World {
 
     for (const floater of this.floaters) {
       if (floater.isDying || floater.isDead) continue
-      floater.update(player.x, player.y)
+      floater.update(player.x, player.y, unseen)
       const touch = floater.touchDamage(player.x, player.y, player.halfWidth, player.height)
       if (touch) this.hurtPlayer(touch)
     }
@@ -346,10 +347,19 @@ export class World {
       if (Math.abs(prop.y - this.player.y) > PICKUP_REACH) continue
 
       let taken = false
-      const ammo = AMMO_ICON.exec(prop.character)
+      const ammo = ammoPickup(prop.character)
+      const power = POWERS[prop.character]
       if (ammo) {
-        this.player.ammo += Number(ammo[1])
+        // Ammo goes to its own weapon's magazine, and picking up something you
+        // did not have is also how you get the weapon.
+        const had = this.player.magazines[ammo.slot]
+        this.player.magazines[ammo.slot] += ammo.amount
+        if (had <= 0) this.player.selectWeapon(ammo.slot)
         this.audio.playNamed('AMMO_SND', { volume: 0.6, x: prop.x, y: prop.y })
+        taken = true
+      } else if (power) {
+        this.player.givePower(power)
+        this.audio.playNamed('HEALTH_UP_SND', { volume: 0.6, x: prop.x, y: prop.y })
         taken = true
       } else if (prop.character === 'HEALTH' && this.player.health < MAX_HEALTH) {
         this.player.health = Math.min(MAX_HEALTH, this.player.health + HEALTH_PICKUP)
@@ -392,30 +402,48 @@ export class World {
   }
 
   /**
-   * Fires the machine gun and advances the shots already in the air.
+   * Fires whatever is in hand and advances the shots already in the air.
    *
    * Impact sounds alternate at random between the two the original uses
    * (lisp/weapons.lsp, mbullet_ai).
    */
   private fireWeapon(wantsToFire: boolean): void {
+    const weapon = this.player.weaponDef
     const shot = this.player.tryFire(wantsToFire)
     if (shot) {
-      this.bullets.spawn(shot.x, shot.y, shot.angle)
+      for (const angle of shot.angles) this.bullets.spawn(shot.x, shot.y, angle, weapon.tracer)
       this.audio.playNamed('MGUN_SND', { volume: 0.5, x: shot.x, y: shot.y })
     }
 
     for (const impact of this.bullets.update(this.level, this.targets)) {
-      const target = impact.hit
-      if (target?.damage(BULLET_DAMAGE)) {
-        this.kills++
-        // Blow up over the middle of what died, not its feet.
-        this.effects.explode(target.x, target.y - target.height / 2)
-        this.audio.playNamed('P_EXPLODE_SND', { volume: 0.55, x: target.x, y: target.y })
+      if (impact.hit) this.hurtTarget(impact.hit, weapon.damage)
+      // Splash catches anything standing near where the shot landed, including
+      // things the tracer itself flew past.
+      if (weapon.splash > 0) {
+        this.effects.explode(impact.x, impact.y)
+        for (const target of this.targets) {
+          if (target === impact.hit || target.isDying || target.isDead) continue
+          const dx = target.x - impact.x
+          const dy = target.y - target.height / 2 - impact.y
+          if (dx * dx + dy * dy > weapon.splash * weapon.splash) continue
+          this.hurtTarget(target, Math.round(weapon.damage * 0.6))
+        }
+        this.audio.playNamed('P_EXPLODE_SND', { volume: 0.5, x: impact.x, y: impact.y })
+      } else {
+        const which = Math.random() < 0.5 ? 'MG_HIT_SND1' : 'MG_HIT_SND2'
+        this.audio.playNamed(which, { volume: 0.6, x: impact.x, y: impact.y })
       }
-      const which = Math.random() < 0.5 ? 'MG_HIT_SND1' : 'MG_HIT_SND2'
-      this.audio.playNamed(which, { volume: 0.6, x: impact.x, y: impact.y })
     }
 
+  }
+
+  /** Damages a prop, and blows it up if that killed it. */
+  private hurtTarget(target: Prop, amount: number): void {
+    if (!target.damage(amount)) return
+    this.kills++
+    // Blow up over the middle of what died, not its feet.
+    this.effects.explode(target.x, target.y - target.height / 2)
+    this.audio.playNamed('P_EXPLODE_SND', { volume: 0.55, x: target.x, y: target.y })
   }
 
   /**
@@ -516,7 +544,7 @@ export class World {
 
     this.messages.layout(viewW, viewH, this.zoom)
     this.statusBar.setHealth(this.player.health)
-    this.statusBar.setWeapon(this.player.ammo)
+    this.statusBar.setWeapon(this.player.weapon, this.player.magazines)
     this.statusBar.layout(viewW, viewH, this.zoom)
   }
 

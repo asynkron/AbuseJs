@@ -101,7 +101,7 @@ export class CeilingAnt extends Prop {
     return killed
   }
 
-  update(playerX: number, playerY: number): void {
+  update(playerX: number, playerY: number, unseen = false): void {
     if (this.touchTimer > 0) this.touchTimer--
     if (this.fireTimer > 0) this.fireTimer--
 
@@ -111,7 +111,7 @@ export class CeilingAnt extends Prop {
     switch (this.phase) {
       case 'hanging':
         // Only worth dropping on someone below - it cannot climb back up.
-        if (distance < NOTICE_RANGE && playerY > this.y) this.enter('stalking')
+        if (!unseen && distance < NOTICE_RANGE && playerY > this.y) this.enter('stalking')
         break
 
       case 'stalking':

@@ -16,7 +16,8 @@ npm run dev      # http://localhost:5173
 ```
 
 Controls: **arrows/WASD** move, **space** jump, **shift** run, **mouse** aims the torso,
-**X** or **left mouse** fire, **down/S** or **E** to use a platform, teleporter or exit portal,
+**X** or **left mouse** fire, **1**–**8**/**Q**/wheel pick a weapon, **C** or **right mouse** holds
+a special power, **down/S** or **E** to use a platform, teleporter or exit portal,
 **V** toggles the CRT filter, **L** toggles level lighting. Everything is reachable from a trackpad —
 no right button anywhere.
 Sound starts muted — there is a volume slider top right.
@@ -97,11 +98,30 @@ These are ours, not the original's — the original's live in a Lisp interpreter
 we take from the shipped data is the *wiring*: which switch drives which door, where a platform's
 travel ends, which frame a turret uses when aiming 30° up-left.
 
-**Shooting.** Hitscan, one tracer per shot, `FIRE_DELAY 3` between rounds and a dry click at 7 when
-the pool is empty. The muzzle is not the player's centre: it comes from the 24-entry
-`small_fire_off` table in the original `src/cop.cpp`, so the tracer leaves the actual gun barrel
-through a full rotation. A round does 5 damage — `do_damage 5` from `weapons.lsp` — and pickups
-name their own amount (`MBULLET_ICON20` is twenty rounds).
+**Eight weapons.** The status bar has eight slots, the art ships eight lit/dim icon pairs, every
+weapon has its own 24-frame torso in `art/coptop.spe`, and the levels scatter ammo for all of them —
+so that is what there is. The pickup prefix ties an icon to a slot: `GRENADE_ICON10` is ten grenades.
+Picking up ammo for something you were not carrying is also how you get the weapon.
+
+All eight are hitscan; what separates them is rate, damage, tracers per pull, spread and whether the
+impact hurts what is standing near it. The machine gun is 5 damage every 3 ticks (`do_damage 5` from
+`weapons.lsp`); the rocket is 30 every 34 with a 60px splash; the disc frisbee throws five tracers
+over 44°. Out of ammo the machine gun does not stop, it labours — 3 ticks with, 7 without, which is
+what "collect ammo to increase firing speed" in the tutorial means. The other seven simply are not
+there to fire.
+
+**1–8** pick a slot, **Q** and the **scroll wheel** step through what you are carrying, skipping
+empty slots. The original says "use the CTRL & INS keys", which is undiscoverable on a laptop.
+
+The muzzle is not the player's centre: it comes from the 24-entry `small_fire_off` table in the
+original `src/cop.cpp`, so the tracer leaves the actual gun barrel through a full rotation.
+
+**Special powers**, held on **C** or the right mouse button — "hold down the right mouse button to
+use special powers", as the tutorial puts it. The levels place four (`POWER_FAST`, `POWER_FLY`,
+`POWER_SNEAKY`, `POWER_HEALTH`); a pickup is worth 360 ticks of use and only drains while the button
+is down. FAST halves the fire delay, FLY turns gravity into a hover that up and down steer, HEAL
+gives back a point every 8 ticks, and SNEAKY stops anything noticing you — it does not call off a
+fight already under way.
 
 **Turrets** (`SPRAY_GUN`, `TRACK_GUN`) sit dormant until you come within 260px, then play their
 open animation, track you through their 24 aim frames, and after a 25-tick wind-up fire every 40
@@ -256,8 +276,9 @@ here obeys the mute gate — a muted page loads no music at all.
   them. And nothing an enemy fires can hit another enemy.
 - **Enemies do not come back.** Kill one and the level is that much emptier until you reload it;
   there is no respawn or spawner logic.
-- **One weapon.** The machine gun. Every ammo pickup tops up the same pool, and the grenade, rocket
-  and plasma art sits unused.
+- **The weapons differ by numbers, not by physics.** All eight are hitscan tracers. Nothing arcs,
+  nothing travels, nothing bounces — a grenade is a fast shot with a splash radius rather than a
+  thrown object.
 - **18 addon levels reference tiles that were never shipped** — mostly `addon/claudio/*` and
   `addon/pong/*`, plus a dozen stray cells in `levels/frabs18` and `levels/frabs30`. `abuse.lsp`
   says as much: claudio's palettes "can only be used with the art files by other authors". Unknown

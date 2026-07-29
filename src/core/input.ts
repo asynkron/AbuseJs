@@ -11,7 +11,7 @@ export interface InputState {
   fire: boolean
   /**
    * The original's secondary action - "hold down the right mouse button to use
-   * special powers". Nothing uses it yet, but it is bound so a trackpad is
+   * special powers". Held rather than tapped; it is also bound to keys so a trackpad is
    * never the thing standing in the way.
    */
   special: boolean
@@ -58,9 +58,34 @@ export class Input {
   /** Latest pointer position in CSS pixels, for aiming. */
   readonly pointer = { x: 0, y: 0, seen: false }
 
+  /**
+   * Weapon selection, queued until the world reads it.
+   *
+   * The original says "use the CTRL & INS keys to select weapons", which is
+   * awkward on a laptop and impossible to discover, so the number row picks a
+   * slot outright and Q/Tab and the scroll wheel step through what you are
+   * carrying. Nothing here needs a right mouse button.
+   */
+  private weaponRequest: number | null = null
+  private weaponStep = 0
+
   /** True only on the frame a jump was pressed, so holding does not re-jump. */
   private jumpWasDown = false
   private jumpBuffered = false
+
+  /** The slot asked for this tick, if any. Clears on read. */
+  consumeWeapon(): number | null {
+    const slot = this.weaponRequest
+    this.weaponRequest = null
+    return slot
+  }
+
+  /** How many slots to step this tick, positive or negative. Clears on read. */
+  consumeWeaponStep(): number {
+    const step = this.weaponStep
+    this.weaponStep = 0
+    return step
+  }
 
   constructor(target: EventTarget = window) {
     target.addEventListener('keydown', (e) => this.set(e as KeyboardEvent, true))
@@ -84,12 +109,33 @@ export class Input {
       if (e.button === 2) this.state.special = false
     })
     // A two-finger tap would otherwise drop a context menu over the game.
+    window.addEventListener(
+      'wheel',
+      (e) => {
+        this.weaponStep += (e as WheelEvent).deltaY > 0 ? 1 : -1
+        e.preventDefault()
+      },
+      { passive: false },
+    )
     window.addEventListener('contextmenu', (e) => {
       if (!(e.target as HTMLElement)?.closest?.('#controls')) e.preventDefault()
     })
   }
 
   private set(event: KeyboardEvent, down: boolean) {
+    // Digit1..Digit8 pick a weapon slot outright.
+    const digit = /^Digit([1-8])$/.exec(event.code)
+    if (digit) {
+      if (down) this.weaponRequest = Number(digit[1]) - 1
+      event.preventDefault()
+      return
+    }
+    if (down && (event.code === 'KeyQ' || event.code === 'Tab')) {
+      this.weaponStep += event.shiftKey ? -1 : 1
+      event.preventDefault()
+      return
+    }
+
     const action = BINDINGS[event.code]
     if (!action) return
     // Arrows and space scroll the page otherwise.

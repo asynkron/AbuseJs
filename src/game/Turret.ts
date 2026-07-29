@@ -59,12 +59,12 @@ export class Turret extends Prop {
     return this.phase !== 'dormant'
   }
 
-  update(playerX: number, playerY: number): void {
+  update(playerX: number, playerY: number, unseen = false): void {
     const distance = Math.hypot(playerX - this.x, playerY - this.y)
 
     switch (this.phase) {
       case 'dormant':
-        if (distance < WAKE_RANGE) this.begin('opening', this.states.open)
+        if (!unseen && distance < WAKE_RANGE) this.begin('opening', this.states.open)
         break
 
       case 'opening':
