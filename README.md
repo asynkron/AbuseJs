@@ -3,10 +3,11 @@
 A web game built on the art, levels and sounds of **Abuse** (Crack dot Com, 1995), with our own
 game mechanics. Rendering is PixiJS v8 (WebGL/WebGPU); everything else is ours.
 
-Current state: real Abuse levels load with their lighting, tile layers, objects, ambience and
-tutorial text; the cop runs, jumps, climbs ramps and walks between levels through the original exit
-portals. Combat, AI and weapons are deliberately not implemented — those are the mechanics this
-project is writing itself. Everything the original shipped is converted and waiting for them.
+Current state: real Abuse levels load with their lighting, tile layers, objects, ambience, music and
+tutorial text; the cop runs, jumps, climbs ramps, rides platforms, takes teleporters and walks
+between levels through the original exit portals. It shoots, and the level shoots back — turrets
+wake and track, ceiling ants drop on you, and both can kill you. The levels' own sensor-and-gate
+wiring drives the doors and lifts.
 
 ```bash
 npm install
@@ -15,7 +16,9 @@ npm run dev      # http://localhost:5173
 ```
 
 Controls: **arrows/WASD** move, **space** jump, **shift** run, **mouse** aims the torso,
-**E** use an exit portal, **V** toggles the CRT filter, **L** toggles level lighting.
+**X** or **left mouse** fire, **down/S** or **E** to use a platform, teleporter or exit portal,
+**V** toggles the CRT filter, **L** toggles level lighting. Everything is reachable from a trackpad —
+no right button anywhere.
 Sound starts muted — there is a volume slider top right.
 Append a level id to the URL to load it, e.g. `#levels/level14` — any id in `public/assets/levels.json`.
 
@@ -84,6 +87,43 @@ live next to the code that uses them; the highlights:
   by helper functions, so the reader expands those templates too.
 - **The player is two sprites**: legs from `art/cop.spe` and a torso from `art/coptop.spe` with 24
   aim frames, pinned at `bottom.y + 29 - bottomHeight` and nudged 4px when facing left.
+
+## Mechanics
+
+These are ours, not the original's — the original's live in a Lisp interpreter we do not have. What
+we take from the shipped data is the *wiring*: which switch drives which door, where a platform's
+travel ends, which frame a turret uses when aiming 30° up-left.
+
+**Shooting.** Hitscan, one tracer per shot, `FIRE_DELAY 3` between rounds and a dry click at 7 when
+the pool is empty. The muzzle is not the player's centre: it comes from the 24-entry
+`small_fire_off` table in the original `src/cop.cpp`, so the tracer leaves the actual gun barrel
+through a full rotation. A round does 5 damage — `do_damage 5` from `weapons.lsp` — and pickups
+name their own amount (`MBULLET_ICON20` is twenty rounds).
+
+**Turrets** (`SPRAY_GUN`, `TRACK_GUN`) sit dormant until you come within 260px, then play their
+open animation, track you through their 24 aim frames, and after a 25-tick wind-up fire every 40
+ticks for 6 damage. They close again with a 60px hysteresis margin so they do not flutter at the
+edge of range.
+
+**Ceiling ants** (`ANT_ROOF`) hang until you pass within 90px horizontally and 260 below, then drop,
+land and chase, turning at walls. Contact costs 8 with a 45-tick cooldown, so brushing one is a
+mistake and not a death sentence.
+
+**Platforms and teleporters** read their endpoints out of the level: a platform's travel is the
+`xacel`/`yacel` pair, its surface is the top of its own sprite, and `start_accel` is how far away
+you can grab it. Riding one carries you continuously rather than in steps, and stepping off it
+keeps the coyote timer alive so a jump off a moving lift works.
+
+**The signal network** is the level's own. Every object carries an `aistate`, and `object_links`
+wires sensors to gates to consumers; `Signals.ts` settles the network over four passes each tick and
+then hands the result to the doors, lifts and force fields that read it. Links are stored 1-based
+(`write_links` counts from 1) and a link can point either way — a door names its switch, but
+level00's sensor names the platform it drives — so the index is built in both directions.
+
+**Damage and death.** 100 health, 30 ticks of invulnerable blink after a hit, and a 120-tick death
+animation before respawning at `START` with a full bar. `hurt()` refuses while the body is already
+down, otherwise a turret that keeps firing at the corpse restarts the death timer forever and the
+respawn never gets a tick to run in.
 
 ## CRT filter
 
@@ -165,10 +205,15 @@ here obeys the mute gate — a muted page loads no music at all.
 
 ## Not done yet
 
-- **Mechanics.** No combat, AI, weapons, damage or pickups — by design. Level objects are spawned
-  and animated but inert; they are scenery for mechanics that do not exist yet.
-- **Status bar contents.** The panel and health are real; weapon slots and ammo counts stay empty
-  until there are weapons to hold.
+- **Only two enemies think.** Turrets and ceiling ants fight; everything else in a level still
+  spawns as animated scenery. Ground ants, the jugger, the trex and the flying enemies have all
+  their art and states converted and no behaviour attached.
+- **Turret shots do not lead you.** They fire along the angle to where you are, so strafing beats
+  them. And nothing an enemy fires can hit another enemy.
+- **Enemies do not come back.** Kill one and the level is that much emptier until you reload it;
+  there is no respawn or spawner logic.
+- **One weapon.** The machine gun. Every ammo pickup tops up the same pool, and the grenade, rocket
+  and plasma art sits unused.
 - **18 addon levels reference tiles that were never shipped** — mostly `addon/claudio/*` and
   `addon/pong/*`, plus a dozen stray cells in `levels/frabs18` and `levels/frabs30`. `abuse.lsp`
   says as much: claudio's palettes "can only be used with the art files by other authors". Unknown
