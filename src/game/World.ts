@@ -98,6 +98,8 @@ export class World {
    * every one of them.
    */
   private readonly blockers: Prop[] = []
+  /** Hidden walls that come down together, keyed by every member. */
+  private readonly wallGroups = new Map<Prop, Prop[]>()
   /** Enemy fire, which hits the player rather than props. */
   private readonly enemyBullets = new Bullets()
   /** The platform the player is standing on, so it can carry them. */
@@ -215,6 +217,7 @@ export class World {
     for (const prop of this.props) {
       if (BLOCKER_TYPES.test(prop.character)) this.blockers.push(prop)
     }
+    this.groupBlockers(level.links)
 
     this.ambience = new AmbientSounds(audio, level.objects)
     this.messages = new TrainMessages(assets, level.objects, trainMessages)
@@ -571,6 +574,35 @@ export class World {
     }
   }
 
+  /**
+   * Groups the hidden walls by what they link to.
+   *
+   * A wall is not one object: level01 has twenty-four `HIDDEN_WALL_2x2` in a
+   * row from x=1500 to x=2040, every one of them linked to the same gate. The
+   * link is the group. Shooting them one 60px block at a time is five shots
+   * per block for a wall six hundred pixels wide, and it looks like the level
+   * is dissolving rather than opening. Sixty-four others carry no link and are
+   * genuinely single blocks.
+   */
+  private groupBlockers(links: number[][]): void {
+    const byTarget = new Map<number, Prop[]>()
+
+    for (const wall of this.blockers) {
+      if (!/^HIDDEN_/.test(wall.character)) continue
+      const target = (links[wall.objectIndex] ?? [])[0]
+      if (target === undefined) continue
+
+      const group = byTarget.get(target) ?? []
+      group.push(wall)
+      byTarget.set(target, group)
+    }
+
+    for (const group of byTarget.values()) {
+      if (group.length < 2) continue
+      for (const wall of group) this.wallGroups.set(wall, group)
+    }
+  }
+
   /** Damages a prop, and blows it up if that killed it. */
   private hurtTarget(target: Prop, amount: number): void {
     if (!target.damage(amount)) return
@@ -578,6 +610,14 @@ export class World {
     // Blow up over the middle of what died, not its feet.
     this.effects.explode(target.x, target.y - target.height / 2)
     this.audio.playNamed('P_EXPLODE_SND', { volume: 0.55, x: target.x, y: target.y })
+
+    // A wall comes down as a wall. One sound for the lot of them, or
+    // twenty-four overlapping copies of the same sample arrive at once.
+    for (const sibling of this.wallGroups.get(target) ?? []) {
+      if (sibling === target || sibling.isDying || sibling.isDead) continue
+      sibling.damage(sibling.health)
+      this.effects.explode(sibling.x, sibling.y - sibling.height / 2)
+    }
   }
 
   /**
@@ -600,6 +640,16 @@ export class World {
         const t = this.targets.indexOf(prop)
         if (t >= 0) this.targets.splice(t, 1)
       }
+    }
+
+    // Blockers are the same objects `props` owns, so they are pruned rather
+    // than retired - ticking them here as well would run every corpse timer
+    // twice and destroy each sprite a second time.
+    for (let i = this.blockers.length - 1; i >= 0; i--) {
+      const blocker = this.blockers[i]
+      if (!blocker.isDead) continue
+      this.blockers.splice(i, 1)
+      this.wallGroups.delete(blocker)
     }
   }
 

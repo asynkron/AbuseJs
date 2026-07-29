@@ -168,6 +168,12 @@ to `localStorage`; dying returns you there instead of to `START`, and so does re
 you can grab it. Riding one carries you continuously rather than in steps, and stepping off it
 keeps the coyote timer alive so a jump off a moving lift works.
 
+**Hidden walls come down as walls.** A wall is not one object: level01 has twenty-four
+`HIDDEN_WALL_2x2` in a row from x=1230 to x=2040, and every one of them links to the same gate. The
+link is the group. Destroy any member and the whole group goes, which is five shots for a wall eight
+hundred pixels wide instead of five shots per 60px block — one block at a time reads as the level
+dissolving rather than opening. Sixty-four of the 102 carry no link and are genuinely single blocks.
+
 **Doors block.** `SWITCH_DOOR` and the trap doors carry `can_block` and a four-state set: `stopped`
 is shut, `running` runs the shutter open, `walking` runs the same frames back. Collision is
 tile-based and a door is an object, so until they were given a collision pass of their own a closed
