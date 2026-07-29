@@ -11,7 +11,6 @@
 // The explicit path matters: macOS filesystems are case-insensitive, so
 // '../effects' is ambiguous with src/game/Effects.ts.
 import { applyBlastGlow, type BlastGlow, type BlastSize } from '../effects/blastGlow'
-import type { FlashSink } from '../effects/blastGlow'
 import type { MoteSink } from '../effects/motes'
 import type { BlastSource } from '../effects/types'
 import type { PuffKind } from '../effects/sprites'
@@ -69,20 +68,25 @@ export function frameSkip(host: ProjectileHost): boolean {
 }
 
 /**
- * `applyBlastGlow` writes through whatever can take a flash; here that is the
- * host's optional `addLight`, adapted rather than passed straight because the
- * host may not have one at all.
+ * The light and the particles over one blast. See effects/blastGlow.ts.
+ *
+ * The flash sink is adapted rather than passed straight through, because the
+ * host's `addLight` is optional and may not be there at all.
  */
-function flashes(ctx: BlastContext): FlashSink | null {
-  const add = ctx.host.addLight
-  if (!add) return null
-  return { add: (x, y, outer, options) => add.call(ctx.host, x, y, outer, options) }
-}
-
-/** The light and the particles over one blast. See effects/blastGlow.ts. */
 function glow(ctx: BlastContext, at: Point, size: BlastSize, extra?: BlastGlow): void {
   if (frameSkip(ctx.host)) return
-  applyBlastGlow(flashes(ctx), ctx.bursts.motes, at.x, at.y, size, extra)
+  const add = ctx.host.addLight
+  applyBlastGlow(
+    {
+      lights: add ? { add: (x, y, outer, options) => add.call(ctx.host, x, y, outer, options) } : null,
+      motes: ctx.bursts.motes,
+      puffs: ctx.bursts,
+    },
+    at.x,
+    at.y,
+    size,
+    extra,
+  )
 }
 
 /** `do_explo (radius amount)` - the ordinary orange blast. */

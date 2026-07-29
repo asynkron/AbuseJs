@@ -1,6 +1,7 @@
 import type { FlashOptions } from './lights'
 import type { MoteSink } from './motes'
 import { random } from './random'
+import type { PuffKind } from './sprites'
 
 /**
  * The light and the particles that go over an explosion's sprites.
@@ -77,6 +78,22 @@ export interface FlashSink {
   add(x: number, y: number, outer: number, options?: FlashOptions): void
 }
 
+/** Whatever can spawn the authored one-shot sprites. `Particles` does. */
+export interface PuffSink {
+  spawn(kind: PuffKind, x: number, y: number, delay?: number, fade?: number): void
+}
+
+/**
+ * The three places a blast writes to. One object rather than three positional
+ * arguments, because two of the three are optional at some call sites and
+ * trailing positionals are how the light lifetime went missing once already.
+ */
+export interface BlastSinks {
+  readonly lights: FlashSink | null
+  readonly motes: MoteSink | null
+  readonly puffs: PuffSink | null
+}
+
 /**
  * Ember colours, and they are deliberately not white.
  *
@@ -88,18 +105,19 @@ export interface FlashSink {
 const FIRE_HOT = 0xffc040
 const FIRE_COOL = 0x901000
 const ASH = 0x4a4038
-const SMOKE_NEAR = 0x8e8e8e
-const SMOKE_FAR = 0x2f2f2f
+
+/** `set_fade_count` on the 0..15 scale - the same value rocket_ai's trail uses. */
+const SMOKE_FADE = 9
 
 export function applyBlastGlow(
-  lights: FlashSink | null,
-  motes: MoteSink | null,
+  sinks: BlastSinks,
   x: number,
   y: number,
   size: BlastSize,
   glow: BlastGlow = {},
 ): void {
   const recipe = RECIPES[size]
+  const { lights, motes, puffs } = sinks
 
   if (lights && !glow.noLight) {
     lights.add(x, y, recipe.outer, {
@@ -124,6 +142,28 @@ export function applyBlastGlow(
     }
   }
 
+  const smoke = Math.round(recipe.smoke * (glow.smoke ?? 1))
+  if (puffs && smoke > 0) {
+    // The game's own cloud art, not a particle.
+    //
+    // Smoke was motes to begin with, and a mote is a flat square of one
+    // colour - fine for an ember two pixels across, and a large grey block at
+    // any size worth calling smoke. `SMALL_DARK_CLOUD` is `art/cloud.spe`'s
+    // smo2, which is what a hit flyer trails and what the rocket lays behind
+    // it, so this is the shape the rest of the game's smoke already has.
+    // Scattered and staggered, because they do not move once placed and
+    // arriving all at once reads as one shape rather than as a cloud growing.
+    for (let i = 0; i < smoke; i++) {
+      puffs.spawn(
+        'SMALL_DARK_CLOUD',
+        x + random(recipe.outer / 2) - recipe.outer / 4,
+        y + random(recipe.outer / 3) - recipe.outer / 4,
+        random(5),
+        SMOKE_FADE,
+      )
+    }
+  }
+
   if (!motes) return
 
   const embers = Math.round(recipe.embers * (glow.embers ?? 1))
@@ -143,22 +183,6 @@ export function applyBlastGlow(
       size: 2,
       sizeTo: 1,
       blend: 'add',
-    })
-  }
-
-  const smoke = Math.round(recipe.smoke * (glow.smoke ?? 1))
-  if (smoke > 0) {
-    motes.burst(smoke, x, y, 90, 110, 1.8, 1.1, {
-      life: 70 + random(60),
-      // Smoke rises, so the pull on it is upward and very slight.
-      gravity: -0.012,
-      drag: 0.95,
-      colour: SMOKE_NEAR,
-      fadeTo: SMOKE_FAR,
-      size: 4,
-      sizeTo: 16,
-      alpha: 0.5,
-      blend: 'normal',
     })
   }
 

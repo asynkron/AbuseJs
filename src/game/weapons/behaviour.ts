@@ -21,7 +21,7 @@ import {
 import { bmove, findTargetInArea, moveUnderGravity } from './bmove'
 import type { MoveOutcome, ProjectileLevel, ProjectileTarget } from './bmove'
 import { blastSource, doDeathRayExplo, doExplo, doWhiteExplo, frameSkip, quickLight } from './blasts'
-import { discExhaust, firebombFlames, rocketExhaust } from './exhaust'
+import { firebombFlames, rocketExhaust } from './exhaust'
 import type { BlastContext } from './blasts'
 import type {
   DeathRay,
@@ -245,7 +245,7 @@ function tickFirebomb(bomb: Firebomb, ctx: TickContext): void {
   // The flame comes first and unconditionally: a firebomb that dies this tick
   // still burns this tick.
   ctx.bursts.spawn('EXPLODE1', bomb.x - randomBelow(5), bomb.y + randomBelow(20))
-  if (!frameSkip(ctx.host)) firebombFlames(ctx.bursts.motes, bomb.x, bomb.y, ctx.gameTick)
+  if (!frameSkip(ctx.host)) firebombFlames(ctx.bursts.motes, bomb.x, bomb.y)
   ctx.host.hurtRadius(
     bomb.x,
     bomb.y,
@@ -282,7 +282,6 @@ const DISC_AIM_OFFSET = 4
 function tickDisc(disc: Disc, ctx: TickContext): void {
   // Half the rocket's smoke rate.
   if (ctx.gameTick % 2 === 0) trailSmoke(disc, 'disc', ctx)
-  if (!frameSkip(ctx.host)) discExhaust(ctx.bursts.motes, disc)
 
   const course = setCourse(disc.heading, DISC_SPEED)
   disc.vx = course.vx

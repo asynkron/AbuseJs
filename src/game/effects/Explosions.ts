@@ -1,4 +1,4 @@
-import { applyBlastGlow } from './blastGlow'
+import { applyBlastGlow, type BlastSinks } from './blastGlow'
 import type { ExplosionLights } from './lights'
 import type { MoteSink } from './motes'
 import type { Particles } from './Particles'
@@ -47,7 +47,12 @@ export class Explosions {
     private readonly motes: MoteSink,
     private readonly audio: SoundPlayer,
     private readonly targets: () => Iterable<Hurtable>,
-  ) {}
+  ) {
+    this.sinks = { lights: this.lights, motes: this.motes, puffs: this.puffs }
+  }
+
+  /** The three sinks `applyBlastGlow` writes to, bundled once. */
+  private readonly sinks: BlastSinks
 
   // ---------------------------------------------------------------- generic
 
@@ -65,7 +70,7 @@ export class Explosions {
     this.puffs.spawn('EXPLODE2', x + random(5), y + random(5), 2)
     this.puffs.spawn('EXPLODE3', x - random(5), y - random(5), 1)
     this.puffs.spawn('EXPLODE3', x - random(5), y - random(5), 2)
-    applyBlastGlow(this.lights, this.motes, x, y, 'small')
+    applyBlastGlow(this.sinks, x, y, 'small')
   }
 
   // ------------------------------------------------------------------ walls
@@ -80,7 +85,7 @@ export class Explosions {
   hiddenWallBlast(x: number, y: number, direction: number, from: BlastSource | null): void {
     this.puffs.spawn('EXPLODE1', x + 15, y - 7, 0)
     this.audio.playNamed('HWALL_SND', { volume: volume(127), x, y })
-    applyBlastGlow(this.lights, this.motes, x + 15, y - 7, 'medium')
+    applyBlastGlow(this.sinks, x + 15, y - 7, 'medium')
     hurtRadius(this.targets(), x + 15 * direction, y - 7, 50, 60, from, 20)
   }
 
@@ -96,7 +101,7 @@ export class Explosions {
     this.audio.playNamed('HWALL_SND', { volume: volume(127), x, y })
     // The biggest thing in the game short of the boss: 120 damage over 110px,
     // and what comes off a wall is wall, so the debris is grey and it bounces.
-    applyBlastGlow(this.lights, this.motes, x, y - 15, 'huge', {
+    applyBlastGlow(this.sinks, x, y - 15, 'huge', {
       debrisColour: 0x6f6a60,
       debrisCollides: true,
     })
@@ -132,11 +137,11 @@ export class Explosions {
     // the light comes apart with the machine instead of firing once at the
     // front of it. A turret sparks more than it burns, hence the metal debris
     // and the thinned embers.
-    applyBlastGlow(this.lights, this.motes, hitX, hitY, 'large', {
+    applyBlastGlow(this.sinks, hitX, hitY, 'large', {
       embers: 0.6,
       debrisColour: 0x8090a0,
     })
-    applyBlastGlow(this.lights, null, hitX, hitY, 'small', { delay: 2 })
+    applyBlastGlow({ ...this.sinks, motes: null, puffs: null }, hitX, hitY, 'small', { delay: 2 })
   }
 
   /**
@@ -155,7 +160,7 @@ export class Explosions {
     // JUGGER it is the entire death - the original plays the sound and draws
     // nothing whatsoever, so one of the five biggest things on the level dies
     // invisibly in a dark room.
-    applyBlastGlow(this.lights, this.motes, x, y - 20, 'large', {
+    applyBlastGlow(this.sinks, x, y - 20, 'large', {
       debrisColour: 0x8090a0,
     })
   }
@@ -178,8 +183,8 @@ export class Explosions {
     // No base flash: `robotBlownUp` fires one at the same instant and the two
     // callers run back to back. These are the secondaries, timed to the middle
     // and the end of the eight sprites.
-    applyBlastGlow(this.lights, this.motes, x, y - 15, 'small', { delay: 2 })
-    applyBlastGlow(this.lights, this.motes, x, y - 15, 'small', { delay: 4 })
+    applyBlastGlow(this.sinks, x, y - 15, 'small', { delay: 2 })
+    applyBlastGlow(this.sinks, x, y - 15, 'small', { delay: 4 })
   }
 
   /**
@@ -192,7 +197,7 @@ export class Explosions {
     this.puffs.spawn('EXPLODE1', x, y - random(20) - 20, 4)
     // Extra smoke: a flyer has been trailing SMALL_DARK_CLOUD the whole way
     // down, so it is already burning when it comes apart.
-    applyBlastGlow(this.lights, this.motes, x, y - 20, 'medium', { smoke: 2 })
+    applyBlastGlow(this.sinks, x, y - 20, 'medium', { smoke: 2 })
   }
 
   // --------------------------------------------------------------- boulders
@@ -203,7 +208,7 @@ export class Explosions {
    */
   boulderChip(x: number, y: number): void {
     this.puffs.spawn('EXPLODE3', x + 10 - random(20), y - random(30), 0)
-    applyBlastGlow(this.lights, this.motes, x, y - 15, 'chip', {
+    applyBlastGlow(this.sinks, x, y - 15, 'chip', {
       tint: 0xffffff,
       embers: 0,
       debrisColour: 0x707068,
@@ -224,7 +229,7 @@ export class Explosions {
     this.puffs.spawn('EXPLODE1', x - random(5), y - random(5), 2)
     // Rock does not burn: no embers at all, plenty of grey chunks, and a plain
     // white flash rather than the fire tint.
-    applyBlastGlow(this.lights, this.motes, x, y, 'large', {
+    applyBlastGlow(this.sinks, x, y, 'large', {
       tint: 0xffffff,
       embers: 0,
       debrisColour: 0x707068,
@@ -240,7 +245,7 @@ export class Explosions {
     this.puffs.spawn('EXPLODE1', x + random(10), y + random(5) - 10, 0)
     this.puffs.spawn('EXPLODE1', x - random(10), y - random(5) - 10, 2)
     this.audio.playNamed('P_EXPLODE_SND', { volume: volume(127), x, y })
-    applyBlastGlow(this.lights, this.motes, x, y - 10, 'small', {
+    applyBlastGlow(this.sinks, x, y - 10, 'small', {
       tint: 0xffffff,
       embers: 0,
       debrisColour: 0x707068,
@@ -266,7 +271,7 @@ export class Explosions {
     // Every fourth tick, not every tick: sixty overlapping flashes is a flat
     // white screen. The embers scale with the timer the way the scatter does.
     if (stateTime % 4 === 0) {
-      applyBlastGlow(this.lights, this.motes, x, y, 'small', {
+      applyBlastGlow(this.sinks, x, y, 'small', {
         embers: 1 + stateTime / 20,
       })
     }
