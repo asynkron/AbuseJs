@@ -185,8 +185,49 @@ export interface CharacterDef {
   range?: [number, number]
   /** Name from `(funs (draw_fun ...))`, used to spot editor-only markers. */
   drawFun?: string
+  /** Name from `(funs (ai_fun ...))`, used to spot idle animators. */
+  aiFun?: string
   /** `(abilities (start_hp 100) (run_top_speed 9) ...)` as a plain record. */
   abilities?: Record<string, number>
+}
+
+/**
+ * Names of AI functions that animate their object continuously while idle.
+ *
+ * Most objects hold a frame until something happens to them: a door steps
+ * through its frames as it opens, a teleporter only spins once you use it.
+ * A few - lava, fire - just cycle forever. The difference is visible in the
+ * script: an idle animator calls `(next_picture)` as a direct step of the
+ * `(0 ...)` branch of its `(select (aistate) ...)`, with nothing guarding it.
+ *
+ * Without this everything with a multi-frame state loops, which is wrong for
+ * doors and teleporters even though their frame lists look identical to lava's.
+ */
+export function extractIdleAnimators(forms: Sexp[]): string[] {
+  const out: string[] = []
+
+  for (const form of walk(forms)) {
+    if (!isSymbol(form[0], 'defun')) continue
+    const name = form[1]
+    if (!isSymbol(name)) continue
+
+    for (const node of walk(form.slice(3))) {
+      if (!isSymbol(node[0], 'select')) continue
+      const subject = node[1]
+      if (!Array.isArray(subject) || !isSymbol(subject[0], 'aistate')) continue
+
+      for (const clause of node.slice(2)) {
+        if (!Array.isArray(clause) || clause[0] !== 0) continue
+        // Direct step of the idle branch, not tucked inside a condition.
+        const unconditional = clause
+          .slice(1)
+          .some((step) => Array.isArray(step) && isSymbol(step[0], 'next_picture'))
+        if (unconditional) out.push(name.name)
+      }
+    }
+  }
+
+  return out
 }
 
 /**
@@ -244,6 +285,7 @@ export function extractCharacters(forms: Sexp[]): CharacterDef[] {
     let statesForm: Sexp[] | undefined
     let range: [number, number] | undefined
     let drawFun: string | undefined
+    let aiFun: string | undefined
     let abilities: Record<string, number> | undefined
 
     for (const clause of form.slice(2)) {
@@ -263,6 +305,9 @@ export function extractCharacters(forms: Sexp[]): CharacterDef[] {
           if (Array.isArray(fn) && isSymbol(fn[0], 'draw_fun') && isSymbol(fn[1])) {
             drawFun = fn[1].name.replace(/^,/, '')
           }
+          if (Array.isArray(fn) && isSymbol(fn[0], 'ai_fun') && isSymbol(fn[1])) {
+            aiFun = fn[1].name.replace(/^,/, '')
+          }
         }
       }
     }
@@ -279,7 +324,7 @@ export function extractCharacters(forms: Sexp[]): CharacterDef[] {
     }
 
     if (Object.keys(states).length === 0) continue
-    out.push({ name: nameNode.name, file: statesForm[1], states, range, drawFun, abilities })
+    out.push({ name: nameNode.name, file: statesForm[1], states, range, drawFun, aiFun, abilities })
   }
 
   return out

@@ -15,6 +15,16 @@ export class Prop extends Entity {
   /** Animation rate in frames per second. */
   private static readonly FPS = 10
 
+  /**
+   * Whether this object cycles its frames on its own.
+   *
+   * Most do not. A door's frames are the positions it opens through and a
+   * teleporter's are the spin it does once used - the original steps them from
+   * the object's AI, not on a timer. Only fire, lava and water genuinely loop,
+   * and the converter works out which from the scripts.
+   */
+  private readonly loops: boolean
+
   constructor(
     assets: GameAssets,
     readonly data: LevelObjectData,
@@ -30,9 +40,12 @@ export class Prop extends Entity {
     // that state no longer exists in the current scripts.
     const state = assets.hasState(data.type, data.state) ? data.state : assets.defaultState(data.type)
     this.setState(state, true)
+
+    this.loops = assets.isIdleAnimated(data.type)
   }
 
   advance(dt: number): void {
+    if (!this.loops) return
     this.advanceAnimation(Prop.FPS * dt)
   }
 }

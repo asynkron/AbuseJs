@@ -30,8 +30,15 @@ export class Platform extends Prop {
   private readonly from: { x: number; y: number }
   private readonly to: { x: number; y: number }
 
-  /** How far above `y` a rider's feet sit. */
-  readonly snapOffset: number
+  /**
+   * How far above `y` the original teleports a boarding player.
+   *
+   * Not the surface height - `small_off` is 15px tall but carries a
+   * `start_accel` of 22, and `big_off` is 44 tall with 26. It is a generous
+   * grab distance for stepping on; standing is handled by the object collision
+   * system, which we do not have. The surface itself comes from the sprite.
+   */
+  readonly boardingReach: number
 
   /** Total travel time in ticks. */
   private readonly duration: number
@@ -48,7 +55,7 @@ export class Platform extends Prop {
     super(assets, data)
     this.from = endpoints[0]
     this.to = endpoints[1]
-    this.snapOffset = assets.ability(data.type, 'start_accel') ?? DEFAULT_SNAP
+    this.boardingReach = assets.ability(data.type, 'start_accel') ?? DEFAULT_SNAP
     this.duration = Math.max(4, data.xacel || DEFAULT_STEPS) * TICKS_PER_STEP
 
     // Levels place the platform at one of its endpoints; start from whichever
@@ -60,12 +67,23 @@ export class Platform extends Prop {
     this.setPosition(start.x, start.y)
   }
 
-  /** The surface a rider stands on: left, right and the top's y. */
+  /**
+   * The surface a rider stands on: left, right and the top's y.
+   *
+   * Taken from the sprite, using the same `y - height + 1` rule everything
+   * else is drawn with, so the player's feet sit on the pixels they look like
+   * they are standing on.
+   */
   get surface(): { left: number; right: number; y: number } {
     const frame = this.currentFrame
     const width = frame?.width ?? 32
+    const height = frame?.height ?? 15
     const anchor = frame?.xcfg ?? width / 2
-    return { left: this.x - anchor, right: this.x - anchor + width, y: this.y - this.snapOffset }
+    return {
+      left: this.x - anchor,
+      right: this.x - anchor + width,
+      y: this.y - height + 1,
+    }
   }
 
   get isMoving(): boolean {

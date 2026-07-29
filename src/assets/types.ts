@@ -48,6 +48,11 @@ export interface CharacterManifest {
    */
   editorOnly?: boolean
   /**
+   * Cycles its frames while idle - fire, lava, water. Everything else holds a
+   * frame until something acts on it.
+   */
+  idleAnimated?: boolean
+  /**
    * Name of the tint array this character indexes with its `aitype` to pick a
    * colour variant, e.g. `ant_tints`.
    */

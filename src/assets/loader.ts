@@ -182,6 +182,11 @@ export class GameAssets {
     return this.chars.characters[character]?.abilities?.[name]
   }
 
+  /** True for the handful of objects that cycle their frames on their own. */
+  isIdleAnimated(character: string): boolean {
+    return this.chars.characters[character]?.idleAnimated === true
+  }
+
   /** True for markers and logic objects that the original only drew in-editor. */
   isEditorOnly(character: string): boolean {
     return this.chars.characters[character]?.editorOnly === true

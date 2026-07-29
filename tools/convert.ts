@@ -34,6 +34,7 @@ import {
   extractCharacters,
   expandCharacterTemplates,
   extractEditorOnlyDrawFuns,
+  extractIdleAnimators,
   extractSounds,
   extractTintArrays,
   extractTrainMessages,
@@ -159,6 +160,8 @@ interface LispScan {
   characters: CharacterDef[]
   /** Draw functions that only run in the level editor. */
   editorOnlyDrawFuns: Set<string>
+  /** AI functions that cycle their object's frames while it sits idle. */
+  idleAnimatorAiFuns: Set<string>
   sounds: SoundTable
   /** TRAIN_MSG tutorial lines, keyed by message number. */
   trainMessages: Record<number, string>
@@ -179,6 +182,7 @@ async function scanLisp(): Promise<LispScan> {
   const characters = new Map<string, CharacterDef>()
   // `dev_draw` is a built-in; the rest are found by shape in the scripts.
   const editorOnlyDrawFuns = new Set<string>(['dev_draw'])
+  const idleAnimatorAiFuns = new Set<string>()
   let sounds: SoundTable = { named: {}, arrays: {} }
   let trainMessages: Record<number, string> = {}
   const tintArrays: Record<string, (string | null)[]> = {}
@@ -200,6 +204,7 @@ async function scanLisp(): Promise<LispScan> {
     for (const c of extractCharacters(forms)) characters.set(c.name, c)
     for (const c of expandCharacterTemplates(forms)) characters.set(c.name, c)
     for (const fn of extractEditorOnlyDrawFuns(forms)) editorOnlyDrawFuns.add(fn)
+    for (const fn of extractIdleAnimators(forms)) idleAnimatorAiFuns.add(fn)
 
     // The sound table is self-contained and order-sensitive, so resolve it
     // from its own file rather than accumulating across the whole tree.
@@ -214,6 +219,7 @@ async function scanLisp(): Promise<LispScan> {
     tileFiles,
     characters: [...characters.values()],
     editorOnlyDrawFuns,
+    idleAnimatorAiFuns,
     sounds,
     trainMessages,
     tintArrays,
@@ -462,6 +468,7 @@ async function convertSprites(
   palette: Buffer,
   characters: CharacterDef[],
   editorOnlyDrawFuns: Set<string>,
+  idleAnimatorAiFuns: Set<string>,
   tintArrays: Record<string, (string | null)[]>,
   tintPalettes: Record<string, Buffer>,
 ) {
@@ -598,6 +605,7 @@ async function convertSprites(
       range?: [number, number]
       states: Record<string, string[]>
       editorOnly?: true
+      idleAnimated?: true
       tints?: string
       abilities?: Record<string, number>
     }
@@ -620,6 +628,7 @@ async function convertSprites(
         ...(c.range ? { range: c.range } : {}),
         states,
         ...(hidden ? { editorOnly: true as const } : {}),
+        ...(c.aiFun && idleAnimatorAiFuns.has(c.aiFun) ? { idleAnimated: true as const } : {}),
         ...(tinted ? { tints: tinted.array } : {}),
         ...(c.abilities && Object.keys(c.abilities).length ? { abilities: c.abilities } : {}),
       }
@@ -990,6 +999,7 @@ async function main() {
     palette,
     lisp.characters,
     lisp.editorOnlyDrawFuns,
+    lisp.idleAnimatorAiFuns,
     lisp.tintArrays,
     tintPalettes,
   )

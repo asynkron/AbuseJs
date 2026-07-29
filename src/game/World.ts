@@ -20,9 +20,6 @@ import { isBlocked, isGrounded } from './collision'
 const EXIT_REACH_X = 20
 const EXIT_REACH_Y = 40
 
-/** How far below a platform's surface the player still counts as landing on it. */
-const PLATFORM_GRAB = 12
-
 /**
  * Owns a loaded level and everything drawn in it.
  *
@@ -186,10 +183,11 @@ export class World {
       const { left, right, y } = platform.surface
       if (this.player.x < left || this.player.x > right) continue
 
-      // Land only when coming down onto it, within a small band, so you can
-      // still jump up through one.
+      // Land only when coming down onto it, so you can still jump up through
+      // one. The reach below the surface is the platform's own `start_accel`,
+      // which is what the original uses to pull a boarding player up.
       const distance = y - this.player.y
-      if (this.player.vy < 0 || distance > 1 || distance < -PLATFORM_GRAB) continue
+      if (this.player.vy < 0 || distance > 1 || distance < -platform.boardingReach) continue
 
       this.player.landOn(y)
       this.riding = platform
