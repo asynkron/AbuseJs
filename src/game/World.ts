@@ -1,4 +1,4 @@
-import { Container, type Renderer } from 'pixi.js'
+import { Container, Graphics, type Renderer } from 'pixi.js'
 
 import type { GameAssets } from '../assets/loader'
 import type { AudioBank } from '../audio/AudioBank'
@@ -19,6 +19,7 @@ import { buildTurrets, type Turret } from './Turret'
 import { buildCeilingAnts, type CeilingAnt } from './CeilingAnt'
 import { buildFloaters, type Floater } from './Floater'
 import { buildDoors, Door } from './Door'
+import { buildForceFields, type ForceField } from './ForceField'
 import { ammoPickup, POWERS } from './Weapons'
 import { CONSOLE_LIT_TICKS, readSave, restore, snapshot, writeSave } from './SaveGame'
 import { Effects } from './Effects'
@@ -118,6 +119,8 @@ export class World {
   private readonly ants: CeilingAnt[]
   private readonly floaters: Floater[]
   private readonly doors: Door[]
+  private readonly forceFields: ForceField[]
+  private readonly fieldGraphics = new Graphics()
   /**
    * Props that are solid without being doors - the hidden walls, mostly, which
    * carry `can_block` and stand in the middle of a corridor looking like part
@@ -209,6 +212,7 @@ export class World {
       this.entityLayer,
       this.bullets.graphics,
       this.enemyBullets.graphics,
+      this.fieldGraphics,
       this.effects.container,
       this.aboveTiles.container,
     )
@@ -222,6 +226,7 @@ export class World {
     this.ants = buildCeilingAnts(assets, level.objects, this.props, level)
     this.floaters = buildFloaters(assets, level.objects, this.props, level)
     this.doors = buildDoors(assets, level.objects, level.links, this.props)
+    this.forceFields = buildForceFields(level.objects, this.props, level)
 
     for (const prop of [
       ...this.props,
@@ -314,6 +319,7 @@ export class World {
     this.signals.update(this.player.x, this.player.y)
     this.applySignals()
     this.updateDoors()
+    this.updateForceFields()
     this.pushOutOfBlockers()
     this.collectPickups()
     this.updateEnemies()
@@ -534,6 +540,20 @@ export class World {
       }
     }
 
+  }
+
+  /**
+   * Runs the force fields. A wired one follows its signal; the rest are simply
+   * on, which is what a field with nothing controlling it should be.
+   */
+  private updateForceFields(): void {
+    for (const field of this.forceFields) {
+      const wired = (this.level.links[field.objectIndex] ?? []).length > 0
+      field.active = !wired || this.signals.isDriven(field.objectIndex)
+      if (field.update(this.now, this.player)) {
+        this.audio.playNamed('FF_SND', { volume: 0.35, x: field.x, y: field.y })
+      }
+    }
   }
 
   /** Runs the doors from their switch, or from proximity when nothing wires them. */
@@ -796,6 +816,9 @@ export class World {
     this.bullets.draw()
     this.enemyBullets.draw()
     this.effects.draw()
+
+    this.fieldGraphics.clear()
+    for (const field of this.forceFields) field.draw(this.fieldGraphics)
 
     // Layers are placed in world space; the containers carry the camera offset.
     //

@@ -179,6 +179,14 @@ recursing.
 They also crack as you shoot them: `hwall_damage` sets the frame from the health fraction, so the
 three `sect` frames are progressive damage rather than an idle animation.
 
+**Force fields.** The blue "FF" glyphs were the editor's marker leaking into the game: `ff_draw`
+opens with `(if (edit_mode) (draw))`, so `FORCE_FIELD`'s only sprite is never meant to reach the
+screen. What you should see is four scattered vertical lines from the object down to the floor, in
+the four colour pairs and widths `ascatter_line` is called with. `ff_ai` finds that floor with
+`(try_move 0 (+ (y) 200))`, plays FF_SND every fourth tick and shoves the player out with
+`(ff_push (first_focus) 35)`. All three in level01 are wired to their own switch, so they are off
+until something turns them on.
+
 **Doors block.** `SWITCH_DOOR` and the trap doors carry `can_block` and a four-state set: `stopped`
 is shut, `running` runs the shutter open, `walking` runs the same frames back. Collision is
 tile-based and a door is an object, so until they were given a collision pass of their own a closed
@@ -316,6 +324,9 @@ here obeys the mute gate — a muted page loads no music at all.
 
 ## Not done yet
 
+- **Editor-only art can still leak through.** `FORCE_FIELD` was drawing its marker because the
+  converter's editor-only detection looks for a bare `(draw)`, and `ff_draw` guards it with
+  `(if (edit_mode) ...)` instead. Other characters may do the same.
 - **Only three enemies think.** Turrets, ceiling ants and floaters fight; everything else still
   spawns as scenery. Ground ants, the jugger, the trex and the flying enemies have all their art
   and states converted and no behaviour attached.
