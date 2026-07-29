@@ -164,6 +164,14 @@ all run their own scripts. A shooter's `aitype` *is* its weapon — the same num
 its health and the round it fires — so an AI shoots by handing its aitype to the same `fire_object`
 the cop uses.
 
+**The wall guns are the other half of that.** `SPRAY_GUN` and `TRACK_GUN` share one character in
+`art/gun2.spe` — a 24-frame barrel behind a two-frame shutter — and both wait on `(activated)`, so
+a level wires them to a sensor, a switch or a gate. The spray gun sweeps a fixed arc and fires on
+every step whether or not anyone is there; the track gun turns one degree a tick towards a point
+eight pixels above the cop's middle, fires a burst of three when it has more or less arrived, then
+looks away for eight ticks. Neither hunts. They are the commonest hostile thing in the game after
+the ants — fifteen in level01, twenty in level03 — and they are what makes a corridor a corridor.
+
 **Deaths are authored, not generic.** Nothing in the original puts one stock explosion over
 everything that dies. A turret throws four fireballs at delays 0,1,2,3 over `BLOWN_UP`; a flyer
 throws three on the beat; ROB1 gets eight at fixed offsets across six ticks; a boulder gets four and

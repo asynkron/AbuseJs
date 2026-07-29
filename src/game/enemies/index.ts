@@ -8,6 +8,7 @@ import { CleanerRobot } from './CleanerRobot'
 import { Enemy, type Battlefield } from './Enemy'
 import { Flyer, FLYER_TYPES } from './Flyer'
 import { Jugger } from './Jugger'
+import { Turret } from './Turret'
 import type { EnemyContext, EnemyOverrides, EnemyShot, PlayerView } from './types'
 
 export { Ant } from './Ant'
@@ -17,6 +18,7 @@ export { CleanerRobot } from './CleanerRobot'
 export { Enemy } from './Enemy'
 export { Flyer } from './Flyer'
 export { Jugger } from './Jugger'
+export { Turret } from './Turret'
 export { canSee, seeDist } from './raycast'
 export type {
   EnemyContext,
@@ -35,6 +37,8 @@ export const ENEMY_TYPES: readonly string[] = [
   'JUGGER',
   'ROB1',
   'BOSS_ANT',
+  'SPRAY_GUN',
+  'TRACK_GUN',
 ]
 
 /**
@@ -182,6 +186,10 @@ function create(
 
     case 'ROB1':
       return new CleanerRobot(assets, object, index, field)
+
+    case 'SPRAY_GUN':
+    case 'TRACK_GUN':
+      return new Turret(assets, object, index, field)
 
     case 'BOSS_ANT':
       return new BossAnt(assets, object, index, field)
