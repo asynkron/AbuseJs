@@ -281,7 +281,7 @@ async function start() {
     // Keep the pass screen-space; the stage's own bounds are the whole level.
     app.stage.filterArea = app.screen
     crt.pixelScale = crtPixelScale(height)
-    crt.gridPeriod = crtGridPeriod(zoom, crtPixelScale(height))
+    crt.gridPeriod = crtGridPeriod(zoom, app.renderer.resolution)
     crt.setScreenSize(width, height)
   }
   applySize()

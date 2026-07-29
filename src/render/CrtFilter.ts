@@ -96,16 +96,24 @@ void main() {
     }
     color += (bloom / 8.0) * BLOOM_ALPHA;
 
-    vec2 frag = uv * size;
+    // Everything on the glass - the shadow mask, the beam's own scanlines, the
+    // rolling band - lives on the curved surface, so it is measured in the
+    // *warped* frame rather than the flat one. Using uv here left the grid
+    // dead straight over a picture that bends, which reads immediately as
+    // wrong. As a bonus this is also the space the game's pixels are square
+    // in, so the grid stays locked to them across the whole tube.
+    vec2 frag = warped * size;
 
     // --- scanlines --------------------------------------------------------
-    // The grid repeats every uGridPeriod, which is locked to the game's pixel
-    // grid rather than to uPixelScale (see crtGridPeriod). Anything else beats
-    // against the pixels and the scanlines crawl as the zoom changes.
+    // uGridPeriod is one game pixel (see crtGridPeriod), so this is one
+    // scanline per source row - what a tube actually draws - with the beam
+    // gap taking the bottom third of each. Sizing it from uPixelScale instead
+    // makes the bands beat against the pixels and crawl.
     float row = floor(fract(frag.y / uGridPeriod) * SCAN_PERIOD);
     if (row >= SCAN_PERIOD - 1.0) color *= 1.0 - SCAN_DARK;
 
     // --- aperture grille --------------------------------------------------
+    // One red-green-blue triad per game pixel, for the same reason.
     float col = floor(fract(frag.x / uGridPeriod) * SCAN_PERIOD);
     vec3 tint = col < 1.0 ? vec3(1.0, 0.235, 0.235)
               : col < 2.0 ? vec3(0.235, 1.0, 0.235)
@@ -253,24 +261,26 @@ export function crtPixelScale(screenHeight: number): number {
  * Screen-space period of one scanline and grille cycle.
  *
  * The rest of the pass is authored against a 960x540 buffer and scaled by
- * `crtPixelScale`, but the grid cannot be, because a cycle that is not a
- * whole number of game pixels beats against the pixel grid: band edges land
- * part-way into a pixel, a different part of it each row, and the scanlines
- * appear to crawl.
+ * `crtPixelScale`, but the grid cannot be. A cycle that is not a whole number
+ * of game pixels beats against them - band edges land part-way into a pixel,
+ * a different part of it each row, and the scanlines crawl.
  *
- * What has to be whole is the *cell* - one scanline, one grille stripe -
- * not just the cycle. A cycle of two pixels split three ways still puts two
- * of its three edges two thirds of the way into a pixel. So size the cell in
- * whole game pixels and let the cycle follow at three of them.
+ * The target is one cycle per game pixel, because that is what a tube does:
+ * one scanline per source row, one shadow-mask triad per source pixel. An
+ * earlier version made a whole game pixel the *cell* rather than the cycle,
+ * which is aligned but three times too coarse - it darkened one row in three
+ * of the game's own pixels and looked like a venetian blind.
+ *
+ * A cycle is three cells, so it needs at least three device pixels to draw at
+ * all. Below zoom 3 a game pixel is smaller than that and the mask would
+ * dissolve into flat grey, so the cycle grows to the next whole number of
+ * game pixels that fits. Coarser than ideal, but still locked to the grid,
+ * and the alternative at those sizes is no CRT at all.
  *
  * `zoom` is the integer scale the world is drawn at, so it is exactly one
- * game pixel. At every window size the game actually runs at, one cell comes
- * out as one game pixel - a scanline every third row and grille stripes one
- * pixel wide, which is what a shadow mask over pixel art should be. The
- * rounding is there for the case where a game pixel is small enough that the
- * authored cell would span several of them.
+ * game pixel; `resolution` converts that to device pixels.
  */
-export function crtGridPeriod(zoom: number, pixelScale: number): number {
-  const cell = zoom * Math.max(1, Math.round(pixelScale / zoom))
-  return 3 * cell
+export function crtGridPeriod(zoom: number, resolution = 1): number {
+  const devicePixelsPerCycle = zoom * resolution
+  return zoom * Math.max(1, Math.ceil(3 / devicePixelsPerCycle))
 }

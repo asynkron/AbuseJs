@@ -150,23 +150,28 @@ chain of effects in one fragment shader, in the same order and with the same con
 
 Costs ~0.07 ms/frame at 1920×1080. Toggle with **V**.
 
-**The grid is locked to the game's pixel grid.** The rest of the pass is authored against a 960x540
-buffer and scaled by `crtPixelScale`, but the scanlines and grille cannot be: a cycle that is not a
-whole number of game pixels beats against them, and the lines crawl. What has to be whole is the
-*cell* — one scanline, one grille stripe — not just the cycle, since a two-pixel cycle split three
-ways still puts two of its edges two thirds of the way into a pixel. `crtGridPeriod` sizes the cell
-in whole game pixels, which at every window size the game actually runs at comes out as exactly one:
-a scanline every third row, grille stripes one pixel wide.
+**The grid is locked to the game's pixel grid, and rides the curvature.** The rest of the pass is
+authored against a 960x540 buffer and scaled by `crtPixelScale`, but the scanlines and grille cannot
+be: a cycle that is not a whole number of game pixels beats against them and the lines crawl.
+`crtGridPeriod` makes one cycle one game pixel — one scanline per source row, one shadow-mask triad
+per source pixel, which is what a tube does. A cycle is three cells and so needs three device pixels
+to draw at all; below zoom 3 it grows to the next whole number of game pixels that fits, coarser
+than ideal but still locked.
 
-That only means anything if the pixels themselves hold still, so the scene offset is snapped to a
-whole game pixel (the camera stays fractional, so the follow is still smooth) and sprite positions
-are rounded the same way. Pixi's own `roundPixels` is not enough — it rounds to a *device* pixel,
-and the world is drawn at an integer zoom, so a sprite can still land a fraction of a game pixel off
-the grid the tiles sit on.
+The grid is measured in the *warped* frame, not the flat one. Everything on the glass — mask, beam,
+rolling band — sits on the curved surface, and a dead-straight grid over a picture that bends reads
+as wrong immediately.
 
-Measured on a rendered frame at zoom 2: grouping rows by their phase in the 6-device-pixel cycle
-gives means of 70.3, 70.6, 72.1, 72.7, **45.4, 45.4** — the darkening falls on exactly two adjacent
-device rows, one whole game pixel, at a fixed phase.
+That only means anything if the pixels hold still, so the scene offset snaps to a whole game pixel
+(the camera stays fractional, so the follow is still smooth) and sprite positions round the same
+way. Pixi's own `roundPixels` is not enough — it rounds to a *device* pixel, and the world is drawn
+at an integer zoom, so a sprite can still land a fraction of a game pixel off the grid the tiles sit
+on.
+
+Measured on a rendered frame at zoom 3, rows grouped by their phase in the 3-device-pixel cycle:
+53.5, 53.4, **24.2** at the centre — one row in three darkened, 75% modulation. At the left and
+right edges that collapses to 2% and 7%, which is the curvature doing its job: the grid is no longer
+at a constant phase in *screen* space because it is riding the warp with the picture.
 
 Two deliberate differences from the original:
 
