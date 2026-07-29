@@ -47,6 +47,10 @@ const WALK_SPEED = 1.5
 const LANDING_TICKS = 24
 /** A drop that has gone on this long has fallen out of the world; land anyway. */
 const MAX_DROP_TICKS = 300
+/** Within this much of the player it stops rather than jittering across them. */
+const CHASE_DEADBAND = 12
+/** Ticks a blocked ant sticks with its new heading before chasing again. */
+const TURN_COMMIT = 40
 /** Contact damage, and how often it can be applied. */
 const TOUCH_DAMAGE = 8
 const TOUCH_COOLDOWN = 45
@@ -67,6 +71,7 @@ export class CeilingAnt extends Prop {
   private phase: Phase = 'hanging'
   private timer = 0
   private touchTimer = 0
+  private turnCooldown = 0
   private fireTimer = FIRE_DELAY
   /** Set on the tick it fires, for the caller to spawn a shot. */
   private pendingShot: { x: number; y: number; angle: number } | null = null
@@ -152,13 +157,32 @@ export class CeilingAnt extends Prop {
         break
 
       case 'walking': {
-        this.direction = dx < 0 ? -1 : 1
+        // Only take a new heading from the player when free to act on it.
+        // Turning towards them every tick while jammed against a wall made the
+        // ant flip its facing on every single frame - it read as a sprite
+        // vibrating in place rather than an animal stuck on a wall.
+        // Close enough is close enough. Chasing to the exact pixel means
+        // overshooting by a step, flipping the sign of dx, and walking back -
+        // every tick, which reads as a sprite vibrating rather than an animal.
+        // It is already touching the player at this range.
+        if (Math.abs(dx) < CHASE_DEADBAND) {
+          this.advanceAnimation(0)
+          break
+        }
+
+        if (this.turnCooldown > 0) this.turnCooldown--
+        else this.direction = dx < 0 ? -1 : 1
+
         const before = this.x
         moveAndCollide(this.level, this, WALK_SPEED * this.direction, GRAVITY * 4)
 
-        // Blocked, or up against a ledge: face the other way.
-        if (Math.abs(this.x - before) < WALK_SPEED * 0.5) {
+        // The cooldown has to gate the turn itself, not just the re-aim. An
+        // ant wedged somewhere it cannot leave is blocked on every tick, so
+        // turning each time it happens flips the facing every frame and the
+        // sprite vibrates in place instead of standing there stuck.
+        if (Math.abs(this.x - before) < WALK_SPEED * 0.5 && this.turnCooldown === 0) {
           this.direction = -this.direction as 1 | -1
+          this.turnCooldown = TURN_COMMIT
         }
         this.advanceAnimation(Math.abs(this.x - before) * (1 / 5))
         break

@@ -31,8 +31,10 @@ interface Sensor {
 
 interface Gate {
   index: number
-  kind: 'and' | 'or' | 'xor' | 'not'
+  kind: 'and' | 'or' | 'xor' | 'not' | 'delay'
   inputs: number[]
+  /** Ticks a delay gate has been waiting to follow its input. */
+  timer?: number
 }
 
 const GATE_KINDS: Record<string, Gate['kind']> = {
@@ -40,7 +42,19 @@ const GATE_KINDS: Record<string, Gate['kind']> = {
   GATE_OR: 'or',
   GATE_XOR: 'xor',
   GATE_NOT: 'not',
+  GATE_DELAY: 'delay',
 }
+
+/**
+ * Ticks a GATE_DELAY holds its input before passing it on.
+ *
+ * The original keeps this in its lisp; the saved objects carry no delay field
+ * of their own - every one in level01 has zeroes across the board. What the
+ * gates are for is visible in how they are wired: level01 chains four of them,
+ * each driving one of a row of four doors, so the row opens in sequence rather
+ * than all at once. This is the value that makes that read as a sequence.
+ */
+const DELAY_TICKS = 22
 
 /** Sensor types that watch for the player. */
 const SENSOR_TYPES = new Set(['SENSOR', 'DIFFICULTY_SENSOR'])
@@ -137,6 +151,15 @@ export class Signals {
   update(playerX: number, playerY: number): void {
     for (const sensor of this.sensors) this.updateSensor(sensor, playerX, playerY)
 
+    // Delay gates count in real ticks, so their clocks run here rather than
+    // inside the settle loop below - that runs several times per tick and
+    // would make a 22-tick delay expire in five.
+    for (const gate of this.gates) {
+      if (gate.kind !== 'delay') continue
+      const wanted = gate.inputs.some((i) => this.isActive(i))
+      gate.timer = wanted === this.isActive(gate.index) ? 0 : (gate.timer ?? 0) + 1
+    }
+
     // Gates read each other, so settle rather than assuming an order.
     for (let pass = 0; pass < SETTLE_PASSES; pass++) {
       let changed = false
@@ -185,6 +208,13 @@ export class Signals {
         return states.filter(Boolean).length % 2 === 1
       case 'not':
         return states.length > 0 && !states[0]
+      case 'delay': {
+        // Follows its input once the clock kept in `update` has run out. A
+        // chain of them turns one switch into a sequence.
+        const wanted = states.some(Boolean)
+        const now = this.isActive(gate.index)
+        return (gate.timer ?? 0) >= DELAY_TICKS ? wanted : now
+      }
     }
   }
 

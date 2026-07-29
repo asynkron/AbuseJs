@@ -18,6 +18,7 @@ import { buildTeleporters, type Teleporter } from './Teleporter'
 import { buildTurrets, type Turret } from './Turret'
 import { buildCeilingAnts, type CeilingAnt } from './CeilingAnt'
 import { buildFloaters, type Floater } from './Floater'
+import { buildDoors, Door } from './Door'
 import { ammoPickup, POWERS } from './Weapons'
 import { CONSOLE_LIT_TICKS, readSave, restore, snapshot, writeSave } from './SaveGame'
 import { Effects } from './Effects'
@@ -70,6 +71,14 @@ export class World {
   private readonly turrets: Turret[]
   private readonly ants: CeilingAnt[]
   private readonly floaters: Floater[]
+  private readonly doors: Door[]
+  /**
+   * Props that are solid without being doors - the hidden walls, mostly, which
+   * carry `can_block` and stand in the middle of a corridor looking like part
+   * of it. Collision is tile-based, so until now you walked straight through
+   * every one of them.
+   */
+  private readonly blockers: Prop[] = []
   /** Enemy fire, which hits the player rather than props. */
   private readonly enemyBullets = new Bullets()
   /** The platform the player is standing on, so it can carry them. */
@@ -164,6 +173,7 @@ export class World {
     this.turrets = buildTurrets(assets, level.objects, this.props)
     this.ants = buildCeilingAnts(assets, level.objects, this.props, level)
     this.floaters = buildFloaters(assets, level.objects, this.props, level)
+    this.doors = buildDoors(assets, level.objects, level.links, this.props)
 
     for (const prop of [
       ...this.props,
@@ -172,6 +182,7 @@ export class World {
       ...this.turrets,
       ...this.ants,
       ...this.floaters,
+      ...this.doors,
     ]) {
       this.propLayer.addChild(prop.sprite)
       if (prop.character === 'NEXT_LEVEL') this.exits.push(prop)
@@ -181,6 +192,9 @@ export class World {
     this.signals = new Signals(level.objects, level.links)
     for (const prop of [...this.props, ...this.turrets, ...this.ants, ...this.floaters]) {
       if (prop.hurtable) this.targets.push(prop)
+    }
+    for (const prop of this.props) {
+      if (assets.hasFlag(prop.character, 'can_block')) this.blockers.push(prop)
     }
 
     this.ambience = new AmbientSounds(audio, level.objects)
@@ -251,6 +265,8 @@ export class World {
 
     this.signals.update(this.player.x, this.player.y)
     this.applySignals()
+    this.updateDoors()
+    this.pushOutOfBlockers()
     this.collectPickups()
     this.updateEnemies()
     this.retireDead()
@@ -472,6 +488,61 @@ export class World {
 
   }
 
+  /** Runs the doors from their switch, or from proximity when nothing wires them. */
+  private updateDoors(): void {
+    for (const door of this.doors) {
+      door.update(this.signals.isDriven(door.objectIndex), this.player.x, this.player.y)
+    }
+  }
+
+  /**
+   * Keeps the player out of anything solid that is not a tile.
+   *
+   * Resolved by pushing along whichever axis needs the least movement, after
+   * the tile pass rather than inside it - doors and hidden walls are thin
+   * slabs standing in corridors, so the shallow axis is always the right one
+   * and the player never gets shoved through a floor.
+   */
+  private pushOutOfBlockers(): void {
+    const player = this.player
+
+    for (const solid of [...this.doors, ...this.blockers]) {
+      if (solid instanceof Door ? !solid.isSolid : solid.isDying || solid.isDead) continue
+
+      const box = solid.hitBox
+      const left = player.x - player.halfWidth
+      const right = player.x + player.halfWidth
+      const top = player.y - player.height
+      const bottom = player.y
+
+      if (right <= box.left || left >= box.right) continue
+      if (bottom <= box.top || top >= box.bottom) continue
+
+      const pushRight = box.right - left
+      const pushLeft = right - box.left
+      const pushDown = box.bottom - top
+      const pushUp = bottom - box.top
+      const least = Math.min(pushRight, pushLeft, pushDown, pushUp)
+
+      if (least === pushRight) {
+        player.x += pushRight
+        player.vx = Math.max(0, player.vx)
+      } else if (least === pushLeft) {
+        player.x -= pushLeft
+        player.vx = Math.min(0, player.vx)
+      } else if (least === pushUp) {
+        player.y -= pushUp
+        if (player.vy > 0) {
+          player.vy = 0
+          player.landOn(box.top)
+        }
+      } else {
+        player.y += pushDown
+        player.vy = Math.max(0, player.vy)
+      }
+    }
+  }
+
   /** Damages a prop, and blows it up if that killed it. */
   private hurtTarget(target: Prop, amount: number): void {
     if (!target.damage(amount)) return
@@ -657,6 +728,7 @@ export class World {
       ...this.turrets,
       ...this.ants,
       ...this.floaters,
+      ...this.doors,
     ]) {
       if (prop.x < left || prop.x > right || prop.y < top || prop.y > bottom) {
         prop.sprite.visible = false

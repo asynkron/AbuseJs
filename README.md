@@ -166,9 +166,22 @@ to `localStorage`; dying returns you there instead of to `START`, and so does re
 you can grab it. Riding one carries you continuously rather than in steps, and stepping off it
 keeps the coyote timer alive so a jump off a moving lift works.
 
+**Doors block.** `SWITCH_DOOR` and the trap doors carry `can_block` and a four-state set: `stopped`
+is shut, `running` runs the shutter open, `walking` runs the same frames back. Collision is
+tile-based and a door is an object, so until they were given a collision pass of their own a closed
+door was a picture you strolled through — as were the hidden walls, of which level01 has over eighty.
+Anything solid that is not a tile now pushes the player out along whichever axis needs the least
+movement, resolved after the tile pass; doors and hidden walls are thin slabs in corridors, so the
+shallow axis is always the right one.
+
+A door wired to a switch does what the network says. An unwired one opens for whoever walks up to it.
+
 **The signal network** is the level's own. Every object carries an `aistate`, and `object_links`
 wires sensors to gates to consumers; `Signals.ts` settles the network over four passes each tick and
-then hands the result to the doors, lifts and force fields that read it. Links are stored 1-based
+then hands the result to the doors, lifts and force fields that read it. `GATE_DELAY` passes its input on after 22 ticks — the saved objects carry no delay of their own, but
+what they are for is visible in the wiring: level01 chains four of them, each driving one of a row of
+four doors, so the row opens in sequence. Its clock runs once per tick rather than inside the settle
+loop, which runs several times and would expire a 22-tick delay in five. Links are stored 1-based
 (`write_links` counts from 1) and a link can point either way — a door names its switch, but
 level00's sensor names the platform it drives — so the index is built in both directions.
 
