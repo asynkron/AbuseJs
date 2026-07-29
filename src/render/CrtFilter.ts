@@ -34,6 +34,7 @@ uniform sampler2D uTexture;
 uniform vec4 uInputClamp;
 uniform float uTime;
 uniform float uPixelScale;
+uniform float uGridPeriod;
 uniform float uIntensity;
 uniform vec2 uScreenSize;
 uniform float uBrightness;
@@ -98,11 +99,14 @@ void main() {
     vec2 frag = uv * size;
 
     // --- scanlines --------------------------------------------------------
-    float row = mod(floor(frag.y / px), SCAN_PERIOD);
+    // The grid repeats every uGridPeriod, which is locked to the game's pixel
+    // grid rather than to uPixelScale (see crtGridPeriod). Anything else beats
+    // against the pixels and the scanlines crawl as the zoom changes.
+    float row = floor(fract(frag.y / uGridPeriod) * SCAN_PERIOD);
     if (row >= SCAN_PERIOD - 1.0) color *= 1.0 - SCAN_DARK;
 
     // --- aperture grille --------------------------------------------------
-    float col = mod(floor(frag.x / px), SCAN_PERIOD);
+    float col = floor(fract(frag.x / uGridPeriod) * SCAN_PERIOD);
     vec3 tint = col < 1.0 ? vec3(1.0, 0.235, 0.235)
               : col < 2.0 ? vec3(0.235, 1.0, 0.235)
                           : vec3(0.235, 0.235, 1.0);
@@ -149,6 +153,7 @@ void main() {
 export interface CrtOptions {
   /** Device pixels per unit of the original 960x540 present space. */
   pixelScale?: number
+  gridPeriod?: number
   /** 0 = untouched, 1 = full effect. */
   intensity?: number
   /** 1 = unchanged. Applied after the CRT pass. */
@@ -162,6 +167,7 @@ export class CrtFilter extends Filter {
     const uniforms = new UniformGroup({
       uTime: { value: 0, type: 'f32' },
       uPixelScale: { value: options.pixelScale ?? 2, type: 'f32' },
+      uGridPeriod: { value: options.gridPeriod ?? 6, type: 'f32' },
       uIntensity: { value: options.intensity ?? 1, type: 'f32' },
       uScreenSize: { value: new Float32Array([960, 540]), type: 'vec2<f32>' },
       uBrightness: { value: options.brightness ?? 1.2, type: 'f32' },
@@ -185,6 +191,7 @@ export class CrtFilter extends Filter {
     return (this.resources.crtUniforms as UniformGroup).uniforms as {
       uTime: number
       uPixelScale: number
+      uGridPeriod: number
       uIntensity: number
       uScreenSize: Float32Array
       uBrightness: number
@@ -199,6 +206,11 @@ export class CrtFilter extends Filter {
 
   set pixelScale(value: number) {
     this.uniforms.uPixelScale = value
+  }
+
+  /** Screen-space size of one scanline/grille cycle. See `crtGridPeriod`. */
+  set gridPeriod(value: number) {
+    this.uniforms.uGridPeriod = value
   }
 
   /** Size of the filtered area in device pixels. */
@@ -235,4 +247,30 @@ export class CrtFilter extends Filter {
 /** Matches the original's look: its constants were authored against 540px tall. */
 export function crtPixelScale(screenHeight: number): number {
   return Math.max(1, screenHeight / 540)
+}
+
+/**
+ * Screen-space period of one scanline and grille cycle.
+ *
+ * The rest of the pass is authored against a 960x540 buffer and scaled by
+ * `crtPixelScale`, but the grid cannot be, because a cycle that is not a
+ * whole number of game pixels beats against the pixel grid: band edges land
+ * part-way into a pixel, a different part of it each row, and the scanlines
+ * appear to crawl.
+ *
+ * What has to be whole is the *cell* - one scanline, one grille stripe -
+ * not just the cycle. A cycle of two pixels split three ways still puts two
+ * of its three edges two thirds of the way into a pixel. So size the cell in
+ * whole game pixels and let the cycle follow at three of them.
+ *
+ * `zoom` is the integer scale the world is drawn at, so it is exactly one
+ * game pixel. At every window size the game actually runs at, one cell comes
+ * out as one game pixel - a scanline every third row and grille stripes one
+ * pixel wide, which is what a shadow mask over pixel art should be. The
+ * rounding is there for the case where a game pixel is small enough that the
+ * authored cell would span several of them.
+ */
+export function crtGridPeriod(zoom: number, pixelScale: number): number {
+  const cell = zoom * Math.max(1, Math.round(pixelScale / zoom))
+  return 3 * cell
 }

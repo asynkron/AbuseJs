@@ -486,8 +486,14 @@ export class World {
     this.effects.draw()
 
     // Layers are placed in world space; the containers carry the camera offset.
-    this.backdrop.position.set(-bgX, -bgY)
-    this.scene.position.set(-camera.x, -camera.y)
+    //
+    // Both offsets are snapped to whole game pixels. The camera itself stays
+    // fractional so the follow stays smooth, but drawing at a fraction of a
+    // pixel puts the whole scene half a texel off its own grid: with
+    // nearest-neighbour sampling that makes pixel edges wobble as you walk,
+    // and it leaves the CRT's scanlines nothing fixed to line up against.
+    this.backdrop.position.set(-Math.round(bgX), -Math.round(bgY))
+    this.scene.position.set(-Math.round(camera.x), -Math.round(camera.y))
 
     // Renders to its own target, so it has to happen before the main pass.
     const { minLight, lights } = this.level.lighting

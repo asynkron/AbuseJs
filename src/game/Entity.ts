@@ -11,6 +11,13 @@ import type { Body } from './collision'
  * (src/objects.cpp, game_object::drawer). Facing left mirrors the sprite and
  * offsets from the opposite edge, which is what keeps guns and feet lined up
  * across a flip.
+ *
+ * Positions are interpolated as floats and rounded to a whole game pixel at
+ * the last moment. Pixi's own `roundPixels` is not enough: it rounds to a
+ * device pixel, and the world is drawn at an integer zoom, so a sprite can
+ * still land a fraction of a game pixel off the grid the tiles sit on. That
+ * shows up as sprite edges crawling against the background - and as the CRT
+ * scanlines refusing to line up with anything.
  */
 export class Entity implements Body {
   readonly sprite = new Sprite()
@@ -115,13 +122,13 @@ export class Entity implements Body {
 
     if (this.direction >= 0) {
       this.sprite.scale.x = 1
-      this.sprite.x = x - frame.xcfg
+      this.sprite.x = Math.round(x - frame.xcfg)
     } else {
       this.sprite.scale.x = -1
       // Mirrored sprites draw from their right edge, so the anchor offset is
       // measured from the other side of the frame.
-      this.sprite.x = x - (frame.width - frame.xcfg - 1) + frame.width
+      this.sprite.x = Math.round(x - (frame.width - frame.xcfg - 1) + frame.width)
     }
-    this.sprite.y = y - frame.height + 1
+    this.sprite.y = Math.round(y - frame.height + 1)
   }
 }

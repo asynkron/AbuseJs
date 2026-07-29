@@ -7,7 +7,7 @@ import { GameLoop } from './core/loop'
 import { Input } from './core/input'
 import { Level } from './game/Level'
 import { World } from './game/World'
-import { CrtFilter, crtPixelScale } from './render/CrtFilter'
+import { CrtFilter, crtGridPeriod, crtPixelScale } from './render/CrtFilter'
 
 /**
  * Smallest logical view we are willing to show. The stage is scaled by an
@@ -281,6 +281,7 @@ async function start() {
     // Keep the pass screen-space; the stage's own bounds are the whole level.
     app.stage.filterArea = app.screen
     crt.pixelScale = crtPixelScale(height)
+    crt.gridPeriod = crtGridPeriod(zoom, crtPixelScale(height))
     crt.setScreenSize(width, height)
   }
   applySize()

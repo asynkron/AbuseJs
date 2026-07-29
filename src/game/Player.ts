@@ -284,12 +284,12 @@ export class Player extends Entity {
 
     if (this.direction >= 0) {
       this.topSprite.scale.x = 1
-      this.topSprite.x = x - frame.xcfg
+      this.topSprite.x = Math.round(x - frame.xcfg)
     } else {
       this.topSprite.scale.x = -1
-      this.topSprite.x = x - (frame.width - frame.xcfg - 1) + frame.width
+      this.topSprite.x = Math.round(x - (frame.width - frame.xcfg - 1) + frame.width)
     }
-    this.topSprite.y = y - frame.height + 1
+    this.topSprite.y = Math.round(y - frame.height + 1)
   }
 
   /** Which of the 24 aim frames the torso is showing. */
