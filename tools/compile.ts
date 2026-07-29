@@ -14,9 +14,24 @@ import { LispSymbol, isSymbol, type Sexp } from './lisp'
  * the moment it runs.
  */
 
+/**
+ * JavaScript reserved words that Abuse happily uses as variable names -
+ * `new`, `this`, `class` and friends all appear in the scripts.
+ */
+const RESERVED = new Set([
+  'break', 'case', 'catch', 'class', 'const', 'continue', 'debugger', 'default', 'delete', 'do',
+  'else', 'enum', 'export', 'extends', 'false', 'finally', 'for', 'function', 'if', 'import',
+  'in', 'instanceof', 'new', 'null', 'return', 'super', 'switch', 'this', 'throw', 'true', 'try',
+  'typeof', 'var', 'void', 'while', 'with', 'yield', 'let', 'static', 'await',
+])
+
 /** Lisp names are not JS identifiers; `-`, `?` and `!` all appear. */
 function ident(name: string): string {
+  // The reader hands back an empty symbol for delimiters it does not model -
+  // backquote, mostly - and `G.` is not a property access.
+  if (name === '') return '$unread'
   const cleaned = name.replace(/[^A-Za-z0-9_$]/g, '_')
+  if (RESERVED.has(cleaned)) return `${cleaned}_`
   return /^[0-9]/.test(cleaned) ? `_${cleaned}` : cleaned
 }
 
@@ -164,11 +179,13 @@ export function compile(forms: Sexp[], moduleName: string): CompileResult {
           }
         }
         const body = form.slice(2).map((f) => expr(f, inner))
+        // Built rather than patched into shape. Rewriting the first `return `
+        // of a template string hit whichever one came first, which for a body
+        // containing its own arrow function was the wrong one.
         const decl = bindings.length ? `let ${bindings.join(', ')}; ` : ''
-        return `(() => { ${decl}return ${body.length ? body[body.length - 1] : 'null'}; })()`.replace(
-          'return ',
-          body.length > 1 ? `${body.slice(0, -1).join('; ')}; return ` : 'return ',
-        )
+        const lead = body.length > 1 ? `${body.slice(0, -1).join('; ')}; ` : ''
+        const last = body.length ? body[body.length - 1] : 'null'
+        return `(() => { ${decl}${lead}return ${last}; })()`
       }
 
       case 'select': {
@@ -242,7 +259,9 @@ export function compile(forms: Sexp[], moduleName: string): CompileResult {
         if (Array.isArray(form[2])) {
           for (const p of form[2]) {
             if (p instanceof LispSymbol) {
-              params.push(ident(p.name))
+              // Generated from untyped lisp. `any` is the honest annotation -
+              // pretending otherwise would only mean casting at every call.
+              params.push(`${ident(p.name)}: any`)
               inner.declare(p.name)
             }
           }
@@ -293,7 +312,14 @@ export function compile(forms: Sexp[], moduleName: string): CompileResult {
 
   const header =
     `// Generated from ${moduleName} by tools/compile.ts. Do not edit.\n` +
-    `import { R, G, truthy } from './runtime'\n\n`
+    // Generated from lisp, not written by anyone. TypeScript's strictness
+    // rules police code a human maintains; here they would only flag unused
+    // script parameters and nullability the original never had. The boundary
+    // it calls - src/lisp/runtime.ts - is fully typechecked, which is where
+    // the checking is worth having.
+    `// @ts-nocheck\n` +
+    `/* eslint-disable */\n` +
+    `import { R, G, truthy } from '../runtime'\n\n`
 
   const init = topLevel.length
     ? `export function load() {\n${topLevel.join('\n')}\n}\n`

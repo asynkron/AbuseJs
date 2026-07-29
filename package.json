@@ -4,7 +4,7 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
-    "assets": "tsx tools/convert.ts",
+    "assets": "tsx tools/convert.ts && tsx tools/scripts.ts",
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview"

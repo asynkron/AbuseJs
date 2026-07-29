@@ -89,7 +89,8 @@ export function truthy(value: unknown): boolean {
 }
 
 /** Globals the scripts set and read. Seeded by each module's `load()`. */
-export const G: Record<string, unknown> = Object.create(null)
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export const G: Record<string, any> = Object.create(null)
 
 /**
  * The hooks, by breadth of use across the scripts. Everything here is bound
@@ -97,7 +98,7 @@ export const G: Record<string, unknown> = Object.create(null)
  * where "our touch" actually lives: the scripts decide *what* happens, we
  * decide what the pieces they name are made of.
  */
-export const R = {
+const HOOKS = {
   /* --- reading the current object ---------------------------------- */
   x: () => self().x,
   y: () => self().y,
@@ -184,4 +185,40 @@ export const R = {
    * attribution, so it is a marker.
    */
   bg: () => null,
-} as const
+}
+
+/** Hooks a script asked for that we have not written. Read by the debug HUD. */
+export const missingHooks = new Set<string>()
+
+/** Generated scripts are untyped lisp; the boundary is `any` by nature. */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type Hook = (...args: any[]) => any
+
+/**
+ * The scripts reference 271 distinct hooks and about forty are implemented.
+ * Typing `R` as the exact set would fail the build on every gap, which turns
+ * an incremental port into a big-bang one. Instead an unimplemented hook is a
+ * real function that records itself and returns nil - so a level runs, the
+ * parts that are covered behave, and the gaps are a list rather than a wall.
+ *
+ * Returning nil rather than throwing is deliberate: nil is lisp's "nothing
+ * happened", which is the right answer for a hook that genuinely has not
+ * happened, and it lets one missing hook stop one behaviour instead of the
+ * whole tick.
+ */
+export const R: Record<string, Hook> = new Proxy(
+  HOOKS as unknown as Record<string, Hook>,
+  {
+    get(target, key: string) {
+      const hook = target[key]
+      if (hook) return hook
+      return (...args: unknown[]) => {
+        if (!missingHooks.has(key)) {
+          missingHooks.add(key)
+          console.warn(`[lisp] no hook for (${key}) - ${args.length} args`)
+        }
+        return null
+      }
+    },
+  },
+)
