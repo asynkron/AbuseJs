@@ -229,6 +229,13 @@ and anything else you are meant to stand on.
 
 A door wired to a switch does what the network says. An unwired one opens for whoever walks up to it.
 
+**Ladders.** `LADDER` draws with `dev_draw`, so the object is an invisible marker and the rungs you
+see are ordinary tiles. The marker and the object it links to are two opposite corners of a
+rectangle; `latter_check_area` in lisp/ladder.lsp tests the player against both and records how far
+below the top they are, which is the only thing `climb_handler` in people.lsp ever reads. Climbing
+is not physics — 3px a tick under direct control with no gravity, stepping off at the top within
+32px of it, and leaving sideways into a fall. level01 has none; level02 has eighteen.
+
 **Teleport doors** (`TP_DOOR`) are neither a pad nor a `SWITCH_DOOR`. `tpd_ai` in
 lisp/teleport.lsp gives them three jobs: slide open when you come near, open the *partner* at the
 same moment so you can see the far end gaping, and carry you across while the action key is held.

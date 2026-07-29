@@ -4,6 +4,7 @@ import type { Frame, GameAssets } from '../assets/loader'
 import type { InputState } from '../core/input'
 import { Entity } from './Entity'
 import { Level } from './Level'
+import { CLIMB_OFF_RANGE, CLIMB_OFF_RISE, CLIMB_SPEED } from './Ladders'
 import { BASE_HEALTH_CAP, drawsTorso, scaleDamage, type PowerVisuals } from './powers'
 import { TORSO_FALLBACK, WEAPON_SLOTS, type WeaponSlot } from './weapons/index'
 import { isGrounded, moveAndCollide } from './collision'
@@ -183,9 +184,24 @@ export class Player extends Entity {
     this.aimAngle = (Math.atan2(-dy, dx) * 180) / Math.PI
   }
 
+  /**
+   * How far below the top of a ladder the cop is, or null when not on one.
+   * The world works this out and hands it over, the same way `latter_ai` sets
+   * `in_climbing_area` on the player before its own handler reads it.
+   */
+  climbDepth: number | null = null
+  /** Where the ladder pulls the cop to horizontally while climbing. */
+  climbCentreX: number | null = null
+
+  get isClimbing(): boolean {
+    return this.state === 'climbing'
+  }
+
   update(input: InputState, jumpPressed: boolean): void {
     this.prevX = this.x
     this.prevY = this.y
+
+    if (this.climbDepth !== null && this.updateClimb(input, jumpPressed)) return
 
     if (this.invulnerable > 0) this.invulnerable--
 
@@ -265,6 +281,58 @@ export class Player extends Entity {
    * the special is actually held, so the powered art reads as the power being
    * used rather than as a second run cycle for sprinting.
    */
+  /**
+   * Climbing, from `climb_handler` in lisp/people.lsp. Returns true while it
+   * owns the tick - the normal physics does not run at all on a ladder, which
+   * is why gravity never has to be turned off anywhere.
+   *
+   * Jumping leaves the ladder rather than being ignored: the original drops
+   * you off sideways when you press a direction with headroom, and a player
+   * who cannot get off a ladder with the jump key will try it anyway.
+   */
+  private updateClimb(input: InputState, jumpPressed: boolean): boolean {
+    const depth = this.climbDepth ?? 0
+
+    if (!this.isClimbing) {
+      // Grabbed by pressing up; walking past a ladder should not stick to it.
+      if (!input.up) return false
+      this.setState('climbing', true)
+      this.vx = 0
+      this.vy = 0
+    }
+
+    if (jumpPressed || input.left || input.right) {
+      this.setState('run_jump_fall', true)
+      this.vy = 0
+      return false
+    }
+
+    if (input.up) {
+      if (depth < CLIMB_OFF_RANGE) {
+        // At the top the cop steps up onto it rather than climbing into air.
+        this.y -= CLIMB_OFF_RISE
+        this.setState('stopped', true)
+        this.climbDepth = null
+        return true
+      }
+      this.y -= CLIMB_SPEED
+      this.advanceAnimation(CLIMB_SPEED / 6)
+    } else if (input.down) {
+      this.y += CLIMB_SPEED
+      this.advanceAnimation(-CLIMB_SPEED / 6)
+    }
+
+    // `latter_check_area` recentres a climbing cop between the two markers.
+    if (this.climbCentreX !== null) {
+      this.x += Math.max(-2, Math.min(2, this.climbCentreX - this.x))
+    }
+
+    this.vx = 0
+    this.vy = 0
+    this.onGround = false
+    return true
+  }
+
   private updateAnimation(): void {
     if (!this.onGround) {
       this.setLegState(this.vy < 0 ? 'run_jump' : 'run_jump_fall')

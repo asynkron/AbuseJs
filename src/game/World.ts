@@ -30,6 +30,7 @@ import { Prop, spawnProps } from './Prop'
 import { CONSOLE_LIT_TICKS, readSave, restore, snapshot, writeSave } from './SaveGame'
 import { buildTeleporters, type Teleporter } from './Teleporter'
 import { buildTeleportDoors, type TeleportDoor } from './TeleportDoor'
+import { buildLadders, climbDepth, ladderAt, type Ladder } from './Ladders'
 import { TrainMessages } from './TrainMessages'
 import {
   AMMO_ICON_SLOT,
@@ -67,8 +68,15 @@ const FLYERS = new Set(['FLYER', 'GREEN_FLYER', 'WHO'])
  */
 const BLOCKER_STEP_HEIGHT = 8
 
-/** How close the player has to be to collect something. */
-const PICKUP_REACH = 18
+/**
+ * How far outside the cop's own box a pickup still counts as touched.
+ *
+ * The test used to be a square 18px either side of `player.y`, which is the
+ * cop's *feet* - so anything above his waist was out of reach, and ammo sitting
+ * at head height on a ledge could not be taken however hard you jumped at it.
+ * It is measured against the whole body now, with this as the grace margin.
+ */
+const PICKUP_MARGIN = 8
 
 /** How close the player must stand to a save console to use it. */
 const CONSOLE_REACH_X = 26
@@ -127,6 +135,8 @@ export class World {
   private readonly propsByIndex = new Map<number, Prop>()
   private readonly teleporters: Teleporter[]
   private readonly teleportDoors: TeleportDoor[]
+  /** Climbable rectangles. LADDER draws with dev_draw, so these are markers. */
+  private readonly ladders: Ladder[]
   private readonly forceFields: ForceField[]
   private readonly fieldGraphics = new Graphics()
 
@@ -252,6 +262,7 @@ export class World {
     // out of the list and drives them itself.
     this.teleporters = buildTeleporters(assets, level.objects, level.links, this.props)
     this.teleportDoors = buildTeleportDoors(assets, level.objects, level.links, this.props)
+    this.ladders = buildLadders(level.objects, level.links)
     this.forceFields = buildForceFields(level.objects, this.props, level)
 
     this.focus = new PlayerFocus(this.player, level)
@@ -352,6 +363,15 @@ export class World {
         special: input.state.special,
       })
     }
+    // Worked out before the player moves, the way `latter_ai` runs over the
+    // focus list and sets `in_climbing_area` on the cop before its own handler
+    // is reached.
+    this.player.climbDepth = climbDepth(this.ladders, this.player.x, this.player.y)
+    this.player.climbCentreX = ladderAt(this.ladders, this.player.x, this.player.y)?.centreX ?? null
+    if (this.player.climbDepth !== null && !this.player.isClimbing) {
+      this.messages.prompt('Press up to climb')
+    }
+
     this.player.update(input.state, input.consumeJump())
 
     const slot = input.consumeWeapon()
@@ -830,8 +850,13 @@ export class World {
   private collectPickups(): void {
     for (let i = this.props.length - 1; i >= 0; i--) {
       const prop = this.props[i]
-      if (Math.abs(prop.x - this.player.x) > PICKUP_REACH) continue
-      if (Math.abs(prop.y - this.player.y) > PICKUP_REACH) continue
+      // Both boxes hang off the feet, so compare the spans rather than the
+      // centres - the same mistake the ant's contact test made.
+      const box = prop.hitBox
+      if (box.right < this.player.x - this.player.halfWidth - PICKUP_MARGIN) continue
+      if (box.left > this.player.x + this.player.halfWidth + PICKUP_MARGIN) continue
+      if (box.bottom < this.player.y - this.player.height - PICKUP_MARGIN) continue
+      if (box.top > this.player.y + PICKUP_MARGIN) continue
       if (!this.takePickup(prop)) continue
 
       prop.sprite.destroy()
