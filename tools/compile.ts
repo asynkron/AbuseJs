@@ -220,6 +220,20 @@ export function compile(forms: Sexp[], moduleName: string): CompileResult {
       case 'set_game_name':
         return 'null'
 
+      /**
+       * `with_object` rebinds the script's current object for the duration of
+       * its body. It cannot be an ordinary call: arguments are evaluated
+       * before the callee runs, so the body would execute against whoever was
+       * current *before* the switch - silently reading the wrong object's x,
+       * hp and aistate. It is used 563 times, so getting this wrong would be
+       * wrong nearly everywhere.
+       */
+      case 'with_object': {
+        const target = expr(form[1], scope)
+        const body = form.slice(2).map((f) => expr(f, scope))
+        return `R.with_object(${target}, () => (${body.length ? body.join(', ') : 'null'}))`
+      }
+
       case 'defun': {
         const fname = form[1]
         if (!(fname instanceof LispSymbol)) return 'null'

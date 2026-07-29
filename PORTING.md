@@ -68,6 +68,19 @@ total_objects next_picture bg set_aistate xvel set_xvel set_x set_state aitype s
 add_object random set_yvel state_time list yvel hp activated concatenate direction go_state distx
 set_aitype`. That set is the target for the first runtime.
 
+`src/lisp/runtime.ts` holds the boundary: roughly forty hooks bound to our own objects behind two
+interfaces, `ScriptObject` and `ScriptHost`. That indirection is where "our touch" lives — the
+scripts decide *what* happens, we decide what the pieces they name are made of.
+
+Two things writing it settled:
+
+- **`with_object` had to become a special form.** Arguments are evaluated before a call, so as an
+  ordinary function its body would have run against whoever was current *before* the switch,
+  silently reading the wrong object's `x`, `hp` and `aistate`. It is used 563 times across 18 of the
+  31 files, so it would have been wrong nearly everywhere. The compiler emits the body as a thunk.
+- **`truthy` is not JavaScript's.** In lisp only `nil` is false, so zero is true — `(if (hp) ...)`
+  is true for a corpse. Every conditional the compiler emits goes through `truthy`.
+
 ### Still to do in the compiler
 
 - **Quote and backquote.** `tools/lisp.ts` drops `'` and skips `` ` `` — fine for the asset
