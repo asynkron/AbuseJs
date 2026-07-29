@@ -13,6 +13,7 @@ import { TileLayer } from '../render/TileLayer'
 import { PlayerCombatant, PropCombatant, type Combatant } from './combat'
 import { isBlocked, isGrounded, moveAndCollide } from './collision'
 import { EffectsSystem, gibFlavourFor, hurtRadius, type BlastSource } from './effects/index'
+import { speed } from './enemies/tuning'
 import { buildEnemies, type EnemyGroup, type EnemyShot, type EnemySound } from './enemies/index'
 import { buildForceFields, type ForceField } from './ForceField'
 import { Level } from './Level'
@@ -1344,6 +1345,18 @@ class PlayerFocus implements LogicFocus {
     if (this.player.isClimbing) return
     this.player.y = y
     this.player.landOn(y)
+  }
+
+  /**
+   * A spring's shove, converted out of the original's units on the way in.
+   *
+   * It arrives after `player.update` has already run, so the cop leaves the
+   * ground on the next tick rather than this one - a frame either way at 60Hz,
+   * and it keeps the spring reading the position the player actually stopped
+   * at.
+   */
+  boost(yvel: number): void {
+    this.player.vy += speed(yvel)
   }
 }
 

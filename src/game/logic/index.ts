@@ -7,6 +7,7 @@ import { LogicObject } from './object'
 import { Platform } from './platforms'
 import { DeathSensor, Sensor } from './sensors'
 import { SignalNetwork } from './signals'
+import { Spring } from './springs'
 import { BallSwitch, DelaySwitch, isDamageSink, OnceSwitch, ToggleSwitch } from './switches'
 import type { LogicHost, LogicObjectData, LogicView } from './types'
 
@@ -44,6 +45,7 @@ const BEHAVIOURS: Record<string, BehaviourFactory> = {
   TRAP_DOOR2: (self, world) => new SlidingDoor(self, world, false),
   TRAP_DOOR3: (self, world) => new SlidingDoor(self, world, false),
   STEP: (self, world) => new DisappearingStep(self, world),
+  SPRING: (self, world) => new Spring(self, world),
   SMART_PLAT_BIG: (self, world) => new Platform(self, world),
   SMART_PLAT_SMALL: (self, world) => new Platform(self, world),
   SMART_PLAT_RED: (self, world) => new Platform(self, world),

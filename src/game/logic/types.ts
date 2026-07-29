@@ -37,7 +37,7 @@ export interface LogicObjectData {
 }
 
 /** The sounds this subsystem plays, by their name in lisp/sfx.lsp. */
-export type LogicSound = 'SWISH' | 'SWITCH_SND' | 'PLAT_A_SND' | 'PLAT_D_SND'
+export type LogicSound = 'SWISH' | 'SWITCH_SND' | 'PLAT_A_SND' | 'PLAT_D_SND' | 'SPRING_SOUND'
 
 /**
  * A player, as the logic sees one.
@@ -55,6 +55,12 @@ export interface LogicFocus {
   tryMove(dx: number, dy: number): void
   /** `set_y` - place the feet, ignoring collision. Used when boarding a lift. */
   setFeetY(y: number): void
+  /**
+   * `(set_yvel (+ (yvel) n))` - a spring's shove, quoted in the original's
+   * units per engine tick. The conversion belongs to whoever owns the physics,
+   * not here: the logic reads what the level saved and passes it straight on.
+   */
+  boost(yvel: number): void
 }
 
 /** Size of one sprite frame, for the push boxes taken from the art. */
