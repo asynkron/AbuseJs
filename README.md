@@ -229,6 +229,14 @@ and anything else you are meant to stand on.
 
 A door wired to a switch does what the network says. An unwired one opens for whoever walks up to it.
 
+**Boulders** (`BOLDER`) are traps, not scenery. `bolder_ai` in lisp/duong.lsp opens with
+`(if (or (eq (total_objects) 0) (not (eq (with_object (get_object 0) (aistate)) 0))))`, so one with
+no link runs immediately and a linked one waits for its object's `aistate`. All four in level01 link
+to a SENSOR sitting between them and the floor — walking under is what springs it. Released, it
+gains a unit of downward speed a tick, bounces (losing two units each time it lands, and going
+silent below an impact speed of 3), and does 30 damage within 19px to whatever it rolls over. It is
+`can_block` until it drops, so it is solid scenery right up to the moment it is not.
+
 **Ladders.** `LADDER` draws with `dev_draw`, so the object is an invisible marker and the rungs you
 see are ordinary tiles. The marker and the object it links to are two opposite corners of a
 rectangle; `latter_check_area` in lisp/ladder.lsp tests the player against both and records how far

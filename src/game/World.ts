@@ -31,6 +31,7 @@ import { CONSOLE_LIT_TICKS, readSave, restore, snapshot, writeSave } from './Sav
 import { buildTeleporters, type Teleporter } from './Teleporter'
 import { buildTeleportDoors, type TeleportDoor } from './TeleportDoor'
 import { buildLadders, climbDepth, ladderAt, type Ladder } from './Ladders'
+import { buildBoulders, type Boulder } from './Boulder'
 import { TrainMessages } from './TrainMessages'
 import {
   AMMO_ICON_SLOT,
@@ -50,7 +51,12 @@ import {
  * on. This is the list of things that are just geometry; the ones whose
  * solidity varies - doors, steps, lifts - come from the logic's own views.
  */
-const BLOCKER_TYPES = /^(HIDDEN_(WALL|RAMP)|BOLDER$|BLOCK$)/
+/**
+ * Solid objects that are simply geometry. BOLDER used to be here, but it is a
+ * trap rather than scenery - it hangs until its sensor trips and then rolls,
+ * so it owns its own collision (see Boulder.ts).
+ */
+const BLOCKER_TYPES = /^(HIDDEN_(WALL|RAMP)|BLOCK$)/
 
 /** The five characters `make_hidden_wall_char` gives `big_wall_ai` to. */
 const BIG_WALLS = /^HIDDEN_WALL_(2x2|3WAL|3FLR|3TOP|AFLR)$/
@@ -153,6 +159,7 @@ export class World {
   private readonly teleportDoors: TeleportDoor[]
   /** Climbable rectangles. LADDER draws with dev_draw, so these are markers. */
   private readonly ladders: Ladder[]
+  private readonly boulders: Boulder[]
   private readonly forceFields: ForceField[]
   private readonly fieldGraphics = new Graphics()
 
@@ -279,6 +286,13 @@ export class World {
     this.teleporters = buildTeleporters(assets, level.objects, level.links, this.props)
     this.teleportDoors = buildTeleportDoors(assets, level.objects, level.links, this.props)
     this.ladders = buildLadders(level.objects, level.links)
+    this.boulders = buildBoulders(assets, level.objects, level.links, this.props, level)
+    // `can_block` holds while one hangs; `updateBoulders` drops it from the
+    // list on the tick it is released and starts moving under its own steam.
+    for (const boulder of this.boulders) {
+      this.blockers.push(boulder)
+      this.addCombatant(boulder)
+    }
     this.forceFields = buildForceFields(level.objects, this.props, level)
 
     this.focus = new PlayerFocus(this.player, level)
@@ -408,6 +422,7 @@ export class World {
     this.applyLogicViews()
     this.rideLifts()
     this.updateForceFields()
+    this.updateBoulders()
     this.useTeleporters(activating)
     this.useTeleportDoors(activating)
     this.useConsoles(activating)
@@ -754,6 +769,40 @@ export class World {
    * a field nothing wires and follows the switch for one that is wired - all
    * three in level01 have their own.
    */
+  /**
+   * Runs the boulders. They hang on `can_block` until their trigger's aistate
+   * goes non-zero, then fall, bounce and hurt whatever they roll over.
+   */
+  private updateBoulders(): void {
+    for (const boulder of this.boulders) {
+      if (boulder.isDying || boulder.isDead) continue
+
+      const hanging = !boulder.isReleased
+      const events = boulder.update((index) => this.logic.isOn(index))
+
+      if (hanging && boulder.isReleased) {
+        // Scenery a tick ago; from now on it moves under its own steam.
+        const i = this.blockers.indexOf(boulder)
+        if (i >= 0) this.blockers.splice(i, 1)
+      }
+
+      if (events.sound) {
+        this.audio.playNamed(events.sound, { volume: 0.6, x: boulder.x, y: boulder.y })
+      }
+      if (events.hurt) {
+        hurtRadius(
+          this.blastTargets(boulder),
+          events.hurt.x,
+          events.hurt.y,
+          events.hurt.radius,
+          events.hurt.amount,
+          null,
+          events.hurt.push,
+        )
+      }
+    }
+  }
+
   private updateForceFields(): void {
     for (const field of this.forceFields) {
       field.active = this.logic.isActivated(field.objectIndex)
