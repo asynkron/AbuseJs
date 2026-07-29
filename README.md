@@ -21,6 +21,7 @@ a special power, **down/S** or **E** to use a platform, teleporter or exit porta
 **V** toggles the CRT filter, **L** toggles level lighting. Everything is reachable from a trackpad —
 no right button anywhere.
 Sound starts muted — there is a volume slider top right.
+Progress is saved at the consoles the levels place, and reloading picks up where you left off.
 Append a level id to the URL to load it, e.g. `#levels/level14` — any id in `public/assets/levels.json`.
 It starts on `levels/level01`, not level00: **level00 is Abuse's training level and contains no
 monsters at all**, so starting there makes a game with working enemies look completely inert.
@@ -144,6 +145,12 @@ those are cleared on the next tick rather than lingering for the corpse timer, w
 them on whichever frame they died on. The corpse countdown runs from the simulation, not the draw
 pass: the draw pass skips anything off screen, so a body killed just as it scrolled away would wait
 forever for a tick that only arrived if you looked back at it.
+
+**The save console** is `RESTART_POSITION` — the same marker a fresh level spawns you at, which is
+why using one is literally moving where you restart. Its `stopped` state is the six-frame idle
+flicker and `running` is `console_on`, so the art already had an activated look to switch to. Press
+down at one and the level id, your position, health, every magazine and the power you are holding go
+to `localStorage`; dying returns you there instead of to `START`, and so does reloading the page.
 
 **Platforms and teleporters** read their endpoints out of the level: a platform's travel is the
 `xacel`/`yacel` pair, its surface is the top of its own sprite, and `start_accel` is how far away

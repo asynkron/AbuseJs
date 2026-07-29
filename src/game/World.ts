@@ -19,6 +19,7 @@ import { buildTurrets, type Turret } from './Turret'
 import { buildCeilingAnts, type CeilingAnt } from './CeilingAnt'
 import { buildFloaters, type Floater } from './Floater'
 import { ammoPickup, POWERS } from './Weapons'
+import { CONSOLE_LIT_TICKS, readSave, restore, snapshot, writeSave } from './SaveGame'
 import { Effects } from './Effects'
 import { StatusBar } from '../render/StatusBar'
 import { TrainMessages } from './TrainMessages'
@@ -34,6 +35,10 @@ const HEALTH_PICKUP = 15
 const MAX_HEALTH = 100
 /** How close the player has to be to collect something. */
 const PICKUP_REACH = 18
+
+/** How close the player must stand to a save console to use it. */
+const CONSOLE_REACH_X = 26
+const CONSOLE_REACH_Y = 40
 
 /** How close the player must stand to an exit portal to use it. */
 const EXIT_REACH_X = 20
@@ -90,6 +95,18 @@ export class World {
    * with the action key held.
    */
   private readonly exits: Prop[] = []
+
+  /**
+   * Save consoles. The object is RESTART_POSITION - the same marker a fresh
+   * level spawns you at - so using one is literally moving where you restart.
+   */
+  private readonly consoles: Prop[] = []
+  /** Where dying puts the player: the last console used, or the level's START. */
+  private restartAt: { x: number; y: number }
+  /** Ticks left on the lit `console_on` frame, per console. */
+  private readonly consoleLit = new Map<Prop, number>()
+  /** Set when a save lands, for the HUD to announce. */
+  savedMessage = 0
 
   /** Set when the player uses an exit; main.ts polls and swaps levels. */
   requestedLevel: string | null = null
@@ -155,6 +172,7 @@ export class World {
     ]) {
       this.propLayer.addChild(prop.sprite)
       if (prop.character === 'NEXT_LEVEL') this.exits.push(prop)
+      if (prop.character === 'RESTART_POSITION') this.consoles.push(prop)
     }
 
     this.signals = new Signals(level.objects, level.links)
@@ -172,6 +190,18 @@ export class World {
     this.entityLayer.addChild(this.player.sprite, this.player.topSprite)
 
     const spawn = this.findSpawn()
+    this.restartAt = spawn
+
+    // A save for this level puts you back at its console with what you had.
+    const saved = readSave()
+    if (saved && saved.level === level.name) {
+      restore(this.player, saved)
+      this.kills = saved.kills
+      this.restartAt = { x: saved.x, y: saved.y }
+      spawn.x = saved.x
+      spawn.y = saved.y
+    }
+
     this.player.setPosition(spawn.x, spawn.y)
     this.camera.snapTo(spawn.x, spawn.y - this.player.height / 2, {
       width: level.widthPx,
@@ -189,6 +219,7 @@ export class World {
   }
 
   update(input: Input): void {
+    this.now++
     if (input.pointer.seen) {
       this.player.aimAt(
         this.camera.x + input.pointer.x / this.zoom,
@@ -206,6 +237,7 @@ export class World {
     this.player.update(input.state, input.consumeJump())
     this.ridePlatforms(activating)
     this.useTeleporters(activating)
+    this.useConsoles(activating)
     const slot = input.consumeWeapon()
     if (slot !== null) this.player.selectWeapon(slot)
     const step = input.consumeWeaponStep()
@@ -324,8 +356,8 @@ export class World {
     // Respawn once the death animation has run its course.
     if (player.isDead) return
     if (player.health <= 0) {
-      const spawn = this.findSpawn()
-      player.revive(spawn.x, spawn.y)
+      // Back to the last console used, or the level's start if there was none.
+      player.revive(this.restartAt.x, this.restartAt.y)
       this.riding = null
     }
   }
@@ -474,6 +506,36 @@ export class World {
    * spin, and when the spin finishes the player is put down at the pad it is
    * linked to.
    */
+  /**
+   * Runs the save consoles: stand at one, press down, and the level id, your
+   * position and everything you are carrying go to localStorage. It also moves
+   * where dying puts you, which is the half of "save" that matters in play.
+   */
+  private useConsoles(activating: boolean): void {
+    for (const console of this.consoles) {
+      const lit = this.consoleLit.get(console) ?? 0
+      if (lit > 0) {
+        if (lit === 1) console.setState('stopped', true)
+        this.consoleLit.set(console, lit - 1)
+      }
+
+      if (!activating || lit > 0) continue
+      if (Math.abs(console.x - this.player.x) > CONSOLE_REACH_X) continue
+      if (Math.abs(console.y - this.player.y) > CONSOLE_REACH_Y) continue
+
+      this.restartAt = { x: console.x, y: this.player.y }
+      const state = snapshot(this.level.name, this.player, this.restartAt, this.kills, this.now)
+      const ok = writeSave(state)
+
+      console.setState('running', true)
+      this.consoleLit.set(console, CONSOLE_LIT_TICKS)
+      this.savedMessage = ok ? CONSOLE_LIT_TICKS : 0
+      this.audio.playNamed('SAVE_SND', { volume: 0.7, x: console.x, y: console.y })
+    }
+
+    if (this.savedMessage > 0) this.savedMessage--
+  }
+
   private useTeleporters(activating: boolean): void {
     for (const pad of this.teleporters) {
       const arrival = pad.update()
@@ -647,6 +709,12 @@ export class World {
    * respawn point, then nudged out of any rock it happens to sit in and
    * dropped onto the first floor below.
    */
+  /**
+   * Tick count, used only to stamp saves. `Date.now` would do, but the loop
+   * already counts and this keeps the world free of wall-clock reads.
+   */
+  private now = 0
+
   private findSpawn(): { x: number; y: number } {
     const marker = this.level.findObject('START', 'RESTART_POSITION')
     const probe = {
