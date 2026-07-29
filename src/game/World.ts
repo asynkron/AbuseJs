@@ -17,6 +17,8 @@ import { spawnProps, type Prop } from './Prop'
 import { buildTeleporters, type Teleporter } from './Teleporter'
 import { buildTurrets, type Turret } from './Turret'
 import { buildCeilingAnts, type CeilingAnt } from './CeilingAnt'
+import { buildFloaters, type Floater } from './Floater'
+import { Effects } from './Effects'
 import { StatusBar } from '../render/StatusBar'
 import { TrainMessages } from './TrainMessages'
 import { isBlocked, isGrounded } from './collision'
@@ -58,6 +60,7 @@ export class World {
   private readonly scene = new Container()
   private readonly propLayer = new Container()
   private readonly entityLayer = new Container()
+  private readonly effects: Effects
 
   /** Level objects, drawn behind the player. */
   private readonly props: Prop[]
@@ -65,6 +68,7 @@ export class World {
   private readonly teleporters: Teleporter[]
   private readonly turrets: Turret[]
   private readonly ants: CeilingAnt[]
+  private readonly floaters: Floater[]
   /** Enemy fire, which hits the player rather than props. */
   private readonly enemyBullets = new Bullets()
   /** The platform the player is standing on, so it can carry them. */
@@ -123,6 +127,7 @@ export class World {
     trainMessages: Record<number, string> = {},
   ) {
     this.assets = assets
+    this.effects = new Effects(assets)
     this.bgTiles = new TileLayer(assets, level, 'back')
     this.fgTiles = new TileLayer(assets, level, 'fore', false)
     this.aboveTiles = new TileLayer(assets, level, 'fore', true)
@@ -134,6 +139,7 @@ export class World {
       this.entityLayer,
       this.bullets.graphics,
       this.enemyBullets.graphics,
+      this.effects.container,
       this.aboveTiles.container,
     )
     this.root.addChild(this.backdrop, this.scene)
@@ -144,6 +150,7 @@ export class World {
     this.teleporters = buildTeleporters(assets, level.objects, level.links, this.props)
     this.turrets = buildTurrets(assets, level.objects, this.props)
     this.ants = buildCeilingAnts(assets, level.objects, this.props, level)
+    this.floaters = buildFloaters(assets, level.objects, this.props, level)
 
     for (const prop of [
       ...this.props,
@@ -151,13 +158,14 @@ export class World {
       ...this.teleporters,
       ...this.turrets,
       ...this.ants,
+      ...this.floaters,
     ]) {
       this.propLayer.addChild(prop.sprite)
       if (prop.character === 'NEXT_LEVEL') this.exits.push(prop)
     }
 
     this.signals = new Signals(level.objects, level.links)
-    for (const prop of [...this.props, ...this.turrets, ...this.ants]) {
+    for (const prop of [...this.props, ...this.turrets, ...this.ants, ...this.floaters]) {
       if (prop.hurtable) this.targets.push(prop)
     }
 
@@ -211,6 +219,7 @@ export class World {
     this.applySignals()
     this.collectPickups()
     this.updateEnemies()
+    this.effects.update()
 
     this.camera.follow(this.player.x, this.player.y - this.player.height / 2, {
       width: this.level.widthPx,
@@ -280,7 +289,21 @@ export class World {
     for (const ant of this.ants) {
       if (ant.isDying || ant.isDead) continue
       ant.update(player.x, player.y)
+
+      const shot = ant.takeShot()
+      if (shot) {
+        this.enemyBullets.spawn(shot.x, shot.y, shot.angle, ENEMY_TRACER)
+        this.audio.playNamed('MGUN_SND', { volume: 0.3, x: shot.x, y: shot.y })
+      }
+
       const touch = ant.touchDamage(player.x, player.y, player.halfWidth, player.height)
+      if (touch) this.hurtPlayer(touch)
+    }
+
+    for (const floater of this.floaters) {
+      if (floater.isDying || floater.isDead) continue
+      floater.update(player.x, player.y)
+      const touch = floater.touchDamage(player.x, player.y, player.halfWidth, player.height)
       if (touch) this.hurtPlayer(touch)
     }
 
@@ -381,7 +404,13 @@ export class World {
     }
 
     for (const impact of this.bullets.update(this.level, this.targets)) {
-      if (impact.hit?.damage(BULLET_DAMAGE)) this.kills++
+      const target = impact.hit
+      if (target?.damage(BULLET_DAMAGE)) {
+        this.kills++
+        // Blow up over the middle of what died, not its feet.
+        this.effects.explode(target.x, target.y - target.height / 2)
+        this.audio.playNamed('P_EXPLODE_SND', { volume: 0.55, x: target.x, y: target.y })
+      }
       const which = Math.random() < 0.5 ? 'MG_HIT_SND1' : 'MG_HIT_SND2'
       this.audio.playNamed(which, { volume: 0.6, x: impact.x, y: impact.y })
     }
@@ -454,6 +483,7 @@ export class World {
     this.player.draw(alpha)
     this.bullets.draw()
     this.enemyBullets.draw()
+    this.effects.draw()
 
     // Layers are placed in world space; the containers carry the camera offset.
     this.backdrop.position.set(-bgX, -bgY)
@@ -495,6 +525,7 @@ export class World {
       ...this.teleporters,
       ...this.turrets,
       ...this.ants,
+      ...this.floaters,
     ]) {
       if (prop.x < left || prop.x > right || prop.y < top || prop.y > bottom) {
         prop.sprite.visible = false

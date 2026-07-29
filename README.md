@@ -21,6 +21,9 @@ Controls: **arrows/WASD** move, **space** jump, **shift** run, **mouse** aims th
 no right button anywhere.
 Sound starts muted — there is a volume slider top right.
 Append a level id to the URL to load it, e.g. `#levels/level14` — any id in `public/assets/levels.json`.
+It starts on `levels/level01`, not level00: **level00 is Abuse's training level and contains no
+monsters at all**, so starting there makes a game with working enemies look completely inert.
+`#levels/level00` still loads the tutorial.
 
 ## Layout
 
@@ -105,9 +108,19 @@ open animation, track you through their 24 aim frames, and after a 25-tick wind-
 ticks for 6 damage. They close again with a 60px hysteresis margin so they do not flutter at the
 edge of range.
 
-**Ceiling ants** (`ANT_ROOF`) hang until you pass within 90px horizontally and 260 below, then drop,
-land and chase, turning at walls. Contact costs 8 with a 45-tick cooldown, so brushing one is a
-mistake and not a death sentence.
+**Ceiling ants** (`ANT_ROOF`) do what their state list says they should: `top_walk` along the
+ceiling towards you, `fire_wait`/`ceil_fire` to shoot straight down, and `fall_start`/`falling`/
+`landing` to come down and fight on the floor. They drop when the floor below is within 400px and
+stay up and shoot when it is not, and being shot wakes one wherever it is. Contact costs 8 with a
+45-tick cooldown.
+
+**Floaters** (`WHO`) are the hovering robot in `art/rob2.spe` and the only creature the training
+level contains. They bob on a patrol line, drift towards you when you come within 300px, play the
+full nine-frame `turn_around` when they reverse, and `flinch_up` when hit.
+
+**Deaths pop.** `EG_EXPLO`'s four-frame blast goes off over the middle of anything that dies, with
+`P_EXPLODE_SND` behind it. Most characters have no `dieing` or `dead` state - `WHO` has neither -
+so without this they simply blinked out of existence.
 
 **Platforms and teleporters** read their endpoints out of the level: a platform's travel is the
 `xacel`/`yacel` pair, its surface is the top of its own sprite, and `start_accel` is how far away
@@ -205,9 +218,11 @@ here obeys the mute gate — a muted page loads no music at all.
 
 ## Not done yet
 
-- **Only two enemies think.** Turrets and ceiling ants fight; everything else in a level still
-  spawns as animated scenery. Ground ants, the jugger, the trex and the flying enemies have all
-  their art and states converted and no behaviour attached.
+- **Only three enemies think.** Turrets, ceiling ants and floaters fight; everything else still
+  spawns as scenery. Ground ants, the jugger, the trex and the flying enemies have all their art
+  and states converted and no behaviour attached.
+- **Nothing spawns.** level01 ships 13 `HIDDEN_ANT` and 10 `ANT_CRACK` - the markers the original
+  used to pour ants into a room - and both are inert here.
 - **Turret shots do not lead you.** They fire along the angle to where you are, so strafing beats
   them. And nothing an enemy fires can hit another enemy.
 - **Enemies do not come back.** Kill one and the level is that much emptier until you reload it;

@@ -17,7 +17,13 @@ import { CrtFilter, crtPixelScale } from './render/CrtFilter'
 const MIN_VIEW_WIDTH = 480
 const MIN_VIEW_HEIGHT = 270
 
-const DEFAULT_LEVEL = 'levels/level00'
+/**
+ * level00 is Abuse's training level and contains no monsters at all - 258
+ * objects, not one of them hostile. Starting there makes a game with working
+ * enemies look completely inert, so the default is the first level that
+ * actually fights back. `#levels/level00` still loads the tutorial.
+ */
+const DEFAULT_LEVEL = 'levels/level01'
 
 const boot = document.getElementById('boot')!
 const hud = document.getElementById('hud')!
