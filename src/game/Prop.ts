@@ -31,6 +31,8 @@ export class Prop extends Entity {
   readonly hurtable: boolean
   /** Remaining health, from the character's `start_hp` ability. */
   health: number
+  /** What it started with, so damage can be shown as a fraction. */
+  readonly maxHealth: number
   /** Counts down once killed, so the death frame is visible before removal. */
   private deathTimer = 0
   private dead = false
@@ -57,11 +59,28 @@ export class Prop extends Entity {
     this.hurtable = assets.hasFlag(data.type, 'hurtable')
     // Levels store a per-object hp; fall back to the character's own start_hp.
     this.health = data.hp || assets.ability(data.type, 'start_hp') || 1
+    this.maxHealth = this.health
   }
 
   advance(dt: number): void {
     if (!this.loops) return
     this.advanceAnimation(Prop.FPS * dt)
+  }
+
+  /**
+   * Steps a multi-frame prop through its frames as it loses health.
+   *
+   * `hwall_damage` in the original's lisp/doors.lsp does exactly this -
+   * `(set_current_frame (/ (* (total_frames) (- max_hp (hp))) max_hp))` - so
+   * a hidden wall's three `sect` frames are progressive damage, not an idle
+   * animation. Without it a wall looks untouched until the shot that breaks
+   * it, and there is no sign you are getting anywhere.
+   */
+  private showDamage(): void {
+    if (this.loops || this.frameCount < 2) return
+    if (this.maxHealth <= 0) return
+    const spent = this.maxHealth - this.health
+    this.setFrame(Math.min(this.frameCount - 1, Math.floor((this.frameCount * spent) / this.maxHealth)))
   }
 
   /**
@@ -100,7 +119,10 @@ export class Prop extends Entity {
     if (!this.hurtable || this.deathTimer > 0 || this.dead) return false
 
     this.health -= amount
-    if (this.health > 0) return false
+    if (this.health > 0) {
+      this.showDamage()
+      return false
+    }
 
     this.health = 0
     // `dieing` is the death throe, `dead` the corpse; most have one or neither.

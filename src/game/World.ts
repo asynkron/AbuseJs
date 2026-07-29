@@ -49,6 +49,33 @@ const PICKUP_REACH = 18
 const BLOCKER_TYPES = /^(HIDDEN_(WALL|RAMP)|BOLDER$|BLOCK$|STEP$)/
 
 /**
+ * What a dying hidden wall throws out, straight from `hwall_ai` and
+ * `big_wall_ai` in the original's lisp/doors.lsp:
+ *
+ *   (hurt_radius (+ (x) (* 15 (direction))) (- (y) 7)  50  60 (bg) 20)
+ *   (hurt_radius (x)                        (- (y) 15) 110 120 (bg) 20)
+ *
+ * The arguments are x, y, radius, damage - so both are far past the 25hp a
+ * block has, which is exactly why one shot takes a whole wall.
+ */
+const WALL_BLASTS = {
+  big: { radius: 110, amount: 120, offsetX: 0, offsetY: -15 },
+  small: { radius: 50, amount: 60, offsetX: 15, offsetY: -7 },
+}
+
+/** The five characters `make_hidden_wall_char` gives `big_wall_ai` to. */
+const BIG_WALLS = /^HIDDEN_WALL_(2x2|3WAL|3FLR|3TOP|AFLR)$/
+
+function wallBlast(character: string): { radius: number; amount: number; offsetX: number; offsetY: number } | null {
+  if (BIG_WALLS.test(character)) return WALL_BLASTS.big
+  if (/^HIDDEN_(WALL[1-5]|RAMP[12])$/.test(character)) return WALL_BLASTS.small
+  return null
+}
+
+/** A chain cannot run longer than this, however the level is built. */
+const BLAST_LIMIT = 512
+
+/**
  * A blocker whose top is within this of the player's feet is stepped onto
  * rather than walked into. The tile collision has the same tolerance for the
  * same reason: hidden walls sit flush in floors, and pushing sideways off one
@@ -98,8 +125,8 @@ export class World {
    * every one of them.
    */
   private readonly blockers: Prop[] = []
-  /** Hidden walls that come down together, keyed by every member. */
-  private readonly wallGroups = new Map<Prop, Prop[]>()
+  /** Hidden walls waiting to go off, so a chain resolves without recursing. */
+  private readonly blastQueue: Prop[] = []
   /** Enemy fire, which hits the player rather than props. */
   private readonly enemyBullets = new Bullets()
   /** The platform the player is standing on, so it can carry them. */
@@ -217,7 +244,6 @@ export class World {
     for (const prop of this.props) {
       if (BLOCKER_TYPES.test(prop.character)) this.blockers.push(prop)
     }
-    this.groupBlockers(level.links)
 
     this.ambience = new AmbientSounds(audio, level.objects)
     this.messages = new TrainMessages(assets, level.objects, trainMessages)
@@ -574,50 +600,63 @@ export class World {
     }
   }
 
-  /**
-   * Groups the hidden walls by what they link to.
-   *
-   * A wall is not one object: level01 has twenty-four `HIDDEN_WALL_2x2` in a
-   * row from x=1500 to x=2040, every one of them linked to the same gate. The
-   * link is the group. Shooting them one 60px block at a time is five shots
-   * per block for a wall six hundred pixels wide, and it looks like the level
-   * is dissolving rather than opening. Sixty-four others carry no link and are
-   * genuinely single blocks.
-   */
-  private groupBlockers(links: number[][]): void {
-    const byTarget = new Map<number, Prop[]>()
-
-    for (const wall of this.blockers) {
-      if (!/^HIDDEN_/.test(wall.character)) continue
-      const target = (links[wall.objectIndex] ?? [])[0]
-      if (target === undefined) continue
-
-      const group = byTarget.get(target) ?? []
-      group.push(wall)
-      byTarget.set(target, group)
-    }
-
-    for (const group of byTarget.values()) {
-      if (group.length < 2) continue
-      for (const wall of group) this.wallGroups.set(wall, group)
-    }
-  }
-
   /** Damages a prop, and blows it up if that killed it. */
   private hurtTarget(target: Prop, amount: number): void {
     if (!target.damage(amount)) return
     this.kills++
     // Blow up over the middle of what died, not its feet.
     this.effects.explode(target.x, target.y - target.height / 2)
-    this.audio.playNamed('P_EXPLODE_SND', { volume: 0.55, x: target.x, y: target.y })
 
-    // A wall comes down as a wall. One sound for the lot of them, or
-    // twenty-four overlapping copies of the same sample arrive at once.
-    for (const sibling of this.wallGroups.get(target) ?? []) {
-      if (sibling === target || sibling.isDying || sibling.isDead) continue
-      sibling.damage(sibling.health)
-      this.effects.explode(sibling.x, sibling.y - sibling.height / 2)
+    if (!wallBlast(target.character)) {
+      this.audio.playNamed('P_EXPLODE_SND', { volume: 0.55, x: target.x, y: target.y })
+      return
     }
+
+    this.audio.playNamed('HWALL_SND', { volume: 0.6, x: target.x, y: target.y })
+    this.blastQueue.push(target)
+    this.runBlasts()
+  }
+
+  /**
+   * Detonates hidden walls, and whatever their blast reaches.
+   *
+   * This is the whole trick, and it is in the original's own lisp: a dying
+   * wall calls `hurt_radius` on itself - 110px for 120 damage from
+   * `big_wall_ai`, 50px for 60 from `hwall_ai` (lisp/doors.lsp). Against 25hp
+   * blocks that is lethal several times over, so the neighbours die, and their
+   * blasts kill *their* neighbours. One shot takes the room. It was never a
+   * group wired up in the level - it is a chain reaction, which is also why
+   * the blast hurts anything else standing in it.
+   *
+   * Worked through a queue rather than by recursing, so a long wall cannot
+   * blow the stack.
+   */
+  private runBlasts(): void {
+    let guard = 0
+
+    while (this.blastQueue.length > 0 && guard++ < BLAST_LIMIT) {
+      const source = this.blastQueue.shift()!
+      const blast = wallBlast(source.character)
+      if (!blast) continue
+
+      const cx = source.x + blast.offsetX * source.direction
+      const cy = source.y + blast.offsetY
+
+      for (const other of this.targets) {
+        if (other === source || other.isDying || other.isDead) continue
+
+        const dx = other.x - cx
+        const dy = other.y - other.height / 2 - cy
+        if (dx * dx + dy * dy > blast.radius * blast.radius) continue
+
+        if (!other.damage(blast.amount)) continue
+        this.kills++
+        this.effects.explode(other.x, other.y - other.height / 2)
+        if (wallBlast(other.character)) this.blastQueue.push(other)
+      }
+    }
+
+    this.blastQueue.length = 0
   }
 
   /**
@@ -649,7 +688,6 @@ export class World {
       const blocker = this.blockers[i]
       if (!blocker.isDead) continue
       this.blockers.splice(i, 1)
-      this.wallGroups.delete(blocker)
     }
   }
 

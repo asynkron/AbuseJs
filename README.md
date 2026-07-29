@@ -168,11 +168,16 @@ to `localStorage`; dying returns you there instead of to `START`, and so does re
 you can grab it. Riding one carries you continuously rather than in steps, and stepping off it
 keeps the coyote timer alive so a jump off a moving lift works.
 
-**Hidden walls come down as walls.** A wall is not one object: level01 has twenty-four
-`HIDDEN_WALL_2x2` in a row from x=1230 to x=2040, and every one of them links to the same gate. The
-link is the group. Destroy any member and the whole group goes, which is five shots for a wall eight
-hundred pixels wide instead of five shots per 60px block — one block at a time reads as the level
-dissolving rather than opening. Sixty-four of the 102 carry no link and are genuinely single blocks.
+**Hidden walls chain.** A wall is not one object — level01 has 102 blocks of 25hp each — and the
+thing that makes a room open from one shot is in the original's own lisp. A dying wall calls
+`hurt_radius` on itself: 110px for 120 damage from `big_wall_ai`, 50px for 60 from `hwall_ai`
+(lisp/doors.lsp). Against 25hp blocks that is lethal several times over, so the neighbours die and
+their blasts kill *their* neighbours. One shot into a fourteen-block run takes twenty-four blocks
+with it, and the blast hurts anything else standing in it. Worked through a queue rather than by
+recursing.
+
+They also crack as you shoot them: `hwall_damage` sets the frame from the health fraction, so the
+three `sect` frames are progressive damage rather than an idle animation.
 
 **Doors block.** `SWITCH_DOOR` and the trap doors carry `can_block` and a four-state set: `stopped`
 is shut, `running` runs the shutter open, `walking` runs the same frames back. Collision is
