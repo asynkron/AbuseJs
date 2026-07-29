@@ -16,7 +16,7 @@ npm run dev      # http://localhost:5173
 ```
 
 Controls: **arrows/WASD** move, **space** jump, **shift** run, **mouse** aims the torso,
-**X** or **left mouse** fire, **1**–**8**/**Q**/wheel pick a weapon, **C** or **right mouse** holds
+**X** or **left mouse** fire, **1**–**8** or **Q** pick a weapon, **C** or **right mouse** holds
 a special power, **down/S** or **E** to use a platform, teleporter or exit portal,
 **V** toggles the CRT filter, **L** toggles level lighting. Everything is reachable from a trackpad —
 no right button anywhere.
@@ -111,8 +111,11 @@ over 44°. Out of ammo the machine gun does not stop, it labours — 3 ticks wit
 what "collect ammo to increase firing speed" in the tutorial means. The other seven simply are not
 there to fire.
 
-**1–8** pick a slot, **Q** and the **scroll wheel** step through what you are carrying, skipping
-empty slots. The original says "use the CTRL & INS keys", which is undiscoverable on a laptop.
+**1–8** pick a slot and **Q** steps through what you are carrying, skipping empty ones. The original
+says "use the CTRL & INS keys", which is undiscoverable on a laptop. Not the scroll wheel: one
+two-finger swipe on a trackpad emits a burst of wheel events, so the weapon flickered through every
+slot the moment you moved your hand, and a trackpad's deltas cannot be reliably told from a real
+wheel's.
 
 The muzzle is not the player's centre: it comes from the 24-entry `small_fire_off` table in the
 original `src/cop.cpp`, so the tracer leaves the actual gun barrel through a full rotation.

@@ -63,8 +63,12 @@ export class Input {
    *
    * The original says "use the CTRL & INS keys to select weapons", which is
    * awkward on a laptop and impossible to discover, so the number row picks a
-   * slot outright and Q/Tab and the scroll wheel step through what you are
-   * carrying. Nothing here needs a right mouse button.
+   * slot outright and Q/Tab step through what you are carrying.
+   *
+   * Deliberately not the scroll wheel. One two-finger swipe on a trackpad
+   * emits a burst of wheel events, so the weapon flickered through every slot
+   * the moment you moved your hand, and there is no reliable way to tell a
+   * trackpad's deltas from a real wheel's.
    */
   private weaponRequest: number | null = null
   private weaponStep = 0
@@ -109,14 +113,6 @@ export class Input {
       if (e.button === 2) this.state.special = false
     })
     // A two-finger tap would otherwise drop a context menu over the game.
-    window.addEventListener(
-      'wheel',
-      (e) => {
-        this.weaponStep += (e as WheelEvent).deltaY > 0 ? 1 : -1
-        e.preventDefault()
-      },
-      { passive: false },
-    )
     window.addEventListener('contextmenu', (e) => {
       if (!(e.target as HTMLElement)?.closest?.('#controls')) e.preventDefault()
     })

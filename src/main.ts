@@ -352,7 +352,7 @@ async function start() {
             }`,
           world.objectSummary,
           `arrows/WASD move   space jump   shift run   down/E use   X or LMB fire` +
-        `   1-8/Q/wheel weapon   C or RMB special` +
+        `   1-8/Q weapon   C or RMB special` +
         `${world.savedMessage > 0 ? '   *** GAME SAVED ***' : ''}` +
         `   [${world.player.weaponDef.name}` +
         `${world.player.power ? `  ${POWER_LABEL[world.player.power]} ${world.player.powerCharge}${world.player.powerActive ? '*' : ''}` : ''}]` +
