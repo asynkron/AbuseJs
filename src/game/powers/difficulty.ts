@@ -13,6 +13,25 @@ export type Difficulty = 'easy' | 'medium' | 'hard' | 'extreme'
 /** What a fresh install gets - lisp/startup.lsp:20. */
 export const DEFAULT_DIFFICULTY: Difficulty = 'hard'
 
+/**
+ * The setting in force, which the title screen picks.
+ *
+ * A module-level value rather than a parameter threaded through every call
+ * site: the original reads a global `difficulty` from wherever it happens to
+ * be (ant.lsp, people.lsp, weapons), and there is exactly one game running at
+ * a time. Every function below still takes an explicit override, so nothing is
+ * forced to consult it.
+ */
+let current: Difficulty = DEFAULT_DIFFICULTY
+
+export function setDifficulty(value: Difficulty): void {
+  current = value
+}
+
+export function getDifficulty(): Difficulty {
+  return current
+}
+
 /** Integer division, which is all the original's `/` ever does. */
 function scale(amount: number, numerator: number, denominator: number): number {
   return Math.trunc((amount * numerator) / denominator)
@@ -23,7 +42,7 @@ function scale(amount: number, numerator: number, denominator: number): number {
  * the first thing it does to `amount`, before the flinch, the palette ramp or
  * the engine's own damage call.
  */
-export function scaleDamage(amount: number, difficulty: Difficulty = DEFAULT_DIFFICULTY): number {
+export function scaleDamage(amount: number, difficulty: Difficulty = current): number {
   switch (difficulty) {
     case 'easy':
       return scale(amount, 1, 2)
@@ -41,7 +60,7 @@ export function scaleDamage(amount: number, difficulty: Difficulty = DEFAULT_DIF
  * the opposite way round to damage: the harder the game, the less a heart is
  * worth, so on the default hard a 20-point heart gives 10.
  */
-export function scaleHeal(amount: number, difficulty: Difficulty = DEFAULT_DIFFICULTY): number {
+export function scaleHeal(amount: number, difficulty: Difficulty = current): number {
   switch (difficulty) {
     case 'easy':
       return amount

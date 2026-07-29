@@ -20,8 +20,10 @@
 export { Powers, type PowersOptions } from './Powers'
 export {
   DEFAULT_DIFFICULTY,
+  getDifficulty,
   scaleDamage,
   scaleHeal,
+  setDifficulty,
   type Difficulty,
 } from './difficulty'
 export {

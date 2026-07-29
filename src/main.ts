@@ -8,6 +8,9 @@ import { Input } from './core/input'
 import { Level } from './game/Level'
 import { World } from './game/World'
 import { CrtFilter, crtGridPeriod, crtPixelScale } from './render/CrtFilter'
+import { setDifficulty } from './game/powers'
+import { showTitleScreen } from './ui/TitleScreen'
+import { readSave } from './game/SaveGame'
 
 /**
  * Smallest logical view we are willing to show. The stage is scaled by an
@@ -173,6 +176,11 @@ async function start() {
 
   say('loading assets')
   const assets = await GameAssets.load((label) => say(`loading ${label}`))
+
+  // Read before anything loads: `loadLevel` writes the current level into the
+  // hash, so by the time the title screen asks whether this was a deep link,
+  // the game has already put one there and it would skip itself.
+  const deepLinked = location.hash.length > 1
 
   // #levels/level03 in the URL picks a level; anything in levels.json works.
   const requested = decodeURIComponent(location.hash.replace(/^#/, '')) || DEFAULT_LEVEL
@@ -363,7 +371,6 @@ async function start() {
 
   // We drive rendering from our own fixed-step loop.
   app.ticker.stop()
-  loop.start()
 
   if (import.meta.env.DEV) {
     // Lets a headless browser step the simulation deterministically; rAF is
@@ -397,6 +404,21 @@ async function start() {
 
   boot.classList.add('hidden')
   setTimeout(() => boot.remove(), 400)
+
+  // The title screen waits for a choice before the first tick. It is also the
+  // gesture the AudioContext needs, so the game no longer starts making noise
+  // the moment you happen to touch a key.
+  const choice = await showTitleScreen({
+    canResume: readSave() !== null,
+    // A deep link like #levels/level14 means someone already chose a level.
+    skip: deepLinked,
+  })
+  setDifficulty(choice.difficulty)
+  unlockAudio()
+
+  // Started only now, so the world does not tick away behind the title screen -
+  // the cop would be falling, and anything that noticed him would be shooting.
+  loop.start()
 
   window.addEventListener('hashchange', () => location.reload())
 }

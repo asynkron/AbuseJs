@@ -18,6 +18,16 @@ npm run assets   # convert assets/original/**.spe -> public/assets  (~2s)
 npm run dev      # http://localhost:5173
 ```
 
+It opens on a title screen. The wording is the original's own, out of `lisp/english.lsp` — "Start New
+Game", "Load Saved Game", and the four difficulties it calls **Wimp, Easy, Normal and Extreme**,
+which are the lisp's `easy`, `medium`, `hard` and `extreme`. Abuse ships set to `hard`, so its
+"Normal" really is the default and the two below it are concessions. The setting scales incoming
+damage and healing (`bottom_damage` and `give_player_health` in `lisp/people.lsp`): on Extreme a
+10-point hit lands as 30 and a 10-point pickup heals 2.
+
+The screen also earns its keep: browsers will not start an AudioContext without a gesture, so the
+game needed a first click anyway. A deep link like `#levels/level14` skips it.
+
 Controls: **arrows/WASD** move, **space** jump, **shift** run, **mouse** aims the torso,
 **X** or **left mouse** fire, **1**–**8** or **Q** pick a weapon, **C** or **right mouse** holds
 a special power, **down/S** or **E** to use a platform, teleporter or exit portal,

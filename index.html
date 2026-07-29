@@ -29,6 +29,76 @@
         transition: opacity 250ms ease;
       }
       #boot.hidden { opacity: 0; }
+
+      /* The title screen. Labels are the original's own, from english.lsp. */
+      #title {
+        position: fixed;
+        inset: 0;
+        z-index: 20;
+        display: grid;
+        place-items: center;
+        background: #05060a center/cover no-repeat url('start.webp');
+        transition: opacity 400ms ease;
+      }
+      #title.hidden { opacity: 0; pointer-events: none; }
+      #title::after {
+        content: '';
+        position: absolute;
+        inset: 0;
+        background: radial-gradient(ellipse at 50% 42%, transparent 30%, #05060acc 78%);
+        pointer-events: none;
+      }
+      #menu {
+        position: relative;
+        z-index: 1;
+        display: grid;
+        gap: 10px;
+        margin-top: 44vh;
+        justify-items: center;
+        font-size: 15px;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+      }
+      #menu button {
+        appearance: none;
+        border: 1px solid #ffffff1c;
+        background: #0a0c12b0;
+        color: #b9c4cf;
+        font: inherit;
+        letter-spacing: inherit;
+        text-transform: inherit;
+        padding: 9px 26px;
+        min-width: 20rem;
+        cursor: pointer;
+        transition: background 120ms, color 120ms, border-color 120ms;
+      }
+      #menu button:hover,
+      #menu button:focus-visible {
+        background: #f0662a22;
+        border-color: #f0662a88;
+        color: #ffd9c2;
+        outline: none;
+      }
+      #menu button[disabled] { opacity: 0.35; cursor: default; }
+      #menu .difficulty {
+        display: flex;
+        gap: 6px;
+        margin-top: 14px;
+      }
+      #menu .difficulty button { min-width: 0; padding: 7px 14px; font-size: 12px; }
+      #menu .difficulty button[aria-pressed='true'] {
+        background: #f0662a33;
+        border-color: #f0662abb;
+        color: #ffd9c2;
+      }
+      #title .hint {
+        position: relative;
+        z-index: 1;
+        margin-top: 18px;
+        font-size: 11px;
+        letter-spacing: 0.1em;
+        color: #6a7480;
+      }
       /* Top-left: the bottom belongs to the game's own status bar now. */
       #hud {
         position: fixed;
@@ -118,6 +188,19 @@
   </head>
   <body>
     <div id="boot">loading&hellip;</div>
+    <div id="title" hidden>
+      <div id="menu">
+        <button id="start-new" type="button">Start New Game</button>
+        <button id="start-load" type="button" disabled>Load Saved Game</button>
+        <div class="difficulty" role="group" aria-label="Difficulty">
+          <button type="button" data-difficulty="easy" aria-pressed="false">Wimp</button>
+          <button type="button" data-difficulty="medium" aria-pressed="false">Easy</button>
+          <button type="button" data-difficulty="hard" aria-pressed="true">Normal</button>
+          <button type="button" data-difficulty="extreme" aria-pressed="false">Extreme</button>
+        </div>
+        <p class="hint">Arrow keys or mouse &middot; Enter to begin</p>
+      </div>
+    </div>
     <div id="controls" hidden>
       <div class="row">
         <label for="brightness">Brightness</label>
