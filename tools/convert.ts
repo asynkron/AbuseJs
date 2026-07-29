@@ -550,7 +550,19 @@ async function convertSprites(
         } else {
           const img = readImage(buf, entry.offset)
           if (img.width === 0 || img.height === 0) continue
-          const rgba = toRGBA(img, palette, false)
+          // Index 0 is the format's transparent colour here as much as it is
+          // in a tile or a figure. The engine decides per draw call rather
+          // than per image - `put_image` takes a transparency flag - and this
+          // used to bake the opaque choice, which painted colour 0 as solid
+          // black. The status bar is where that shows: every weapon icon is
+          // 42px wide with exactly 8 index-0 pixels on every row, against a
+          // slot step of 34, so the transparent strip *is* the overlap that
+          // lets the panels tuck under each other. Opaque, each one laid a
+          // black wedge over its neighbour. Everything else this touches is
+          // either a title screen whose index-0 background is black and drawn
+          // on black anyway, or the same kind of padding - `sbar` itself is
+          // 320 wide with the right 35 columns unpainted.
+          const rgba = toRGBA(img, palette, true)
           if (img.width > STANDALONE_THRESHOLD || img.height > STANDALONE_THRESHOLD) {
             const file = `images/${id.replace(/[^\w]/g, '_')}__${entry.name.replace(/[^\w]/g, '_')}.png`
             standalone.push({ key, file, width: img.width, height: img.height, rgba })
