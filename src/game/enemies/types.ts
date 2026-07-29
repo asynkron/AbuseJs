@@ -119,6 +119,14 @@ export interface EnemyShot {
   /** Tracer colour, from the round's own `find_rgb` or gun tint. */
   colour: number
   sound: EnemySound
+  /**
+   * An exact launch velocity, in this game's units, for the shooters that set
+   * one rather than letting `fire_object` derive it from the angle. Only the
+   * jugger does: `jug_ai` adds a GRENADE and then overwrites its velocity with
+   * `(throw_xvel * direction, throw_yvel)`, which is a much lazier arc than
+   * `(set_course angle 20)` would give.
+   */
+  velocity?: { vx: number; vy: number }
 }
 
 /**

@@ -89,6 +89,13 @@ export interface LevelObjectData {
   yvel: number
   xacel: number
   yacel: number
+  /**
+   * The object's saved script variables by name - a JUGGER's `stationary`, a
+   * TRACK_GUN's `track_start_angle`. Loaded over the constructor's defaults in
+   * the original, so a saved zero is a real value. Omitted when the type
+   * declares no vars.
+   */
+  lvars?: Record<string, number>
 }
 
 export interface ImagesManifest {

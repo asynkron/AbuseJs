@@ -1,4 +1,4 @@
-import { SIM_TICKS_PER_TICK } from './effects/clock'
+import { speed } from './enemies/tuning'
 import type { BlastSource, Hurtable } from './effects/types'
 import type { Player } from './Player'
 import type { Prop } from './Prop'
@@ -29,8 +29,9 @@ export type DealDamage = (amount: number, from: BlastSource | null) => void
  *
  * The height is measured off the drawn frame rather than read from `height`,
  * which Entity leaves at its 28px placeholder for everything that is not the
- * cop. `hurt_radius` measures to the middle of the target, so a 60px turret
- * taking its blast 14px off the floor is a visible difference.
+ * cop. `hurt_radius` measures to both ends of the target and keeps whichever
+ * is nearer the blast, so a 60px turret's real height decides whether a blast
+ * at its feet reaches it at all.
  */
 export class PropCombatant implements Combatant {
   constructor(
@@ -124,12 +125,16 @@ export class PlayerCombatant implements Combatant {
   }
 
   /**
-   * The blast throws him. `hurt_radius`'s push is in pixels per engine tick,
-   * so it is divided down to the 60Hz tick the player's physics runs at.
+   * The blast throws him. `hurt_radius`'s push is a velocity in the original's
+   * units, so it converts like every other velocity in the game rather than by
+   * the ratio of the tick rates: dividing by four instead left a grenade's
+   * shove at well under half of this cop's own jump, where the original's
+   * `max_push` of 20 against a `jump_yvel` of 15 plainly meant to lift him off
+   * his feet.
    */
   hurt(amount: number, from: BlastSource | null, pushX: number, pushY: number): void {
     this.deal(amount, from)
-    this.player.vx += pushX / SIM_TICKS_PER_TICK
-    this.player.vy += pushY / SIM_TICKS_PER_TICK
+    this.player.vx += speed(pushX)
+    this.player.vy += speed(pushY)
   }
 }

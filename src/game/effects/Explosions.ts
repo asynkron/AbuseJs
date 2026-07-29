@@ -57,6 +57,21 @@ export class Explosions {
   // ---------------------------------------------------------------- generic
 
   /**
+   * `do_explo` (lisp/explo.lsp): GRENADE_SND, two staggered EXPLODE1
+   * fireballs, a light, and the blast itself - `hurt_radius` over `radius`
+   * pixels for up to `amount`, push capped at 20. `from` is the object's
+   * link 0 in the script, which the mines and bombs leave empty, so their
+   * blasts hurt the player and monsters alike.
+   */
+  doExplo(x: number, y: number, radius: number, amount: number, from: BlastSource | null = null): void {
+    this.audio.playNamed('GRENADE_SND', { volume: volume(127), x, y })
+    this.puffs.spawn('EXPLODE1', x + random(10), y + random(10) - 20, 0)
+    this.puffs.spawn('EXPLODE1', x - random(10), y - random(10) - 20, 2)
+    applyBlastGlow(this.sinks, x, y, 'large', {})
+    hurtRadius(this.targets(), x, y, radius, amount, from, 20)
+  }
+
+  /**
    * The four-sprite debris cluster: three EXPLODE3 and one EXPLODE2 inside a
    * 5px box, staggered 0,2,1,2. No sound and no light.
    *

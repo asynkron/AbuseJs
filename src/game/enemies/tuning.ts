@@ -18,7 +18,7 @@
  *
  * Durations go the other way: a wait of N original ticks is N * 3/2 of ours.
  */
-const TICK_SCALE = 2 / 3
+export const TICK_SCALE = 2 / 3
 
 /** An original velocity (pixels per original tick) in pixels per our tick. */
 export const speed = (original: number): number => original * TICK_SCALE

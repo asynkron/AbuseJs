@@ -52,10 +52,34 @@ export function setCourse(angle: number, speed: number): Velocity {
  * `(set_frame_angle 0 359 angle)` - map a heading onto a state's frame list.
  * Frame 0 aims due right and the list runs counter-clockwise, which is the
  * same mapping Player.ts already uses for the torso's 24 aim frames.
+ *
+ * The engine's version (src/clisp.cpp, case 155) biases the angle by
+ * `90/tframes` before the division and truncates rather than rounding, so the
+ * frames straddle their headings instead of starting on them.
  */
 export function frameForAngle(angle: number, frameCount: number): number {
   if (frameCount <= 0) return 0
-  return Math.round((normalizeAngle(angle) / 360) * frameCount) % frameCount
+  const biased = normalizeAngle(angle + Math.floor(90 / frameCount))
+  return Math.floor((biased * frameCount) / 360) % frameCount
+}
+
+/**
+ * The same mapping for an object drawn mirrored.
+ *
+ * `set_frame_angle` finishes with `if (direction > 0) current_frame = f; else
+ * current_frame = tframes - f - 1`, because a left-facing sprite is drawn
+ * x-flipped and the flip has to be undone in the frame choice. Without it
+ * every left-facing wall gun's barrel points along the reflection of its real
+ * aim, which reads as a turret shooting the wrong way.
+ */
+export function frameForAngleFacing(
+  angle: number,
+  frameCount: number,
+  direction: number,
+): number {
+  const frame = frameForAngle(angle, frameCount)
+  if (direction > 0 || frameCount <= 0) return frame
+  return frameCount - frame - 1
 }
 
 /**

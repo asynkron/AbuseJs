@@ -32,7 +32,8 @@ import { CONSOLE_LIT_TICKS, readSave, restore, snapshot, writeSave } from './Sav
 import { buildTeleporters, type Teleporter } from './Teleporter'
 import { buildTeleportDoors, type TeleportDoor } from './TeleportDoor'
 import { buildLadders, climbDepth, ladderAt, type Ladder } from './Ladders'
-import { buildBoulders, type Boulder } from './Boulder'
+import { buildBoulders, CHUNK_VELOCITIES, SmallBoulder, type Boulder } from './Boulder'
+import { buildHazards, type Hazards } from './Hazards'
 import { TrainMessages } from './TrainMessages'
 import {
   AMMO_ICON_SLOT,
@@ -168,6 +169,10 @@ export class World {
   /** Climbable rectangles. LADDER draws with dev_draw, so these are markers. */
   private readonly ladders: Ladder[]
   private readonly boulders: Boulder[]
+  /** Debris from dead boulders, alive until each one lands and bursts. */
+  private readonly smallBoulders: SmallBoulder[] = []
+  /** Mines, bombs, lava and lightning - lisp/duong.lsp's stationary dangers. */
+  private readonly hazards: Hazards
   private readonly forceFields: ForceField[]
   private readonly fieldGraphics = new Graphics()
 
@@ -304,9 +309,11 @@ export class World {
     this.boulders = buildBoulders(assets, level.objects, level.links, this.props, level)
     // `can_block` holds while one hangs; `updateBoulders` drops it from the
     // list on the tick it is released and starts moving under its own steam.
+    // They were taken out of `props`, so the sprite and combatant they would
+    // have been given there come from here.
     for (const boulder of this.boulders) {
       this.blockers.push(boulder)
-      this.addCombatant(boulder)
+      this.addActor(boulder)
     }
     this.forceFields = buildForceFields(level.objects, this.props, level)
 
@@ -340,6 +347,27 @@ export class World {
       if (prop.character === 'RESTART_POSITION') this.consoles.push(prop)
       if (BLOCKER_TYPES.test(prop.character)) this.blockers.push(prop)
     }
+
+    // The stationary dangers keep their props - they animate and take damage
+    // like any other scenery - and only borrow them to run their AI.
+    this.hazards = buildHazards(assets, this.props, level.links, {
+      playerBox: () => ({
+        x: this.player.x,
+        y: this.player.y,
+        halfWidth: this.player.halfWidth,
+        height: this.player.height,
+      }),
+      isActivated: (index) => (index >= 0 ? this.logic.isActivated(index) : true),
+      explode: (x, y, radius, amount) => {
+        this.fx.explosions.doExplo(x, y, radius, amount)
+      },
+      hurtPlayer: (amount) => this.hurtPlayer(amount),
+      lavaBurst: (x, y) => this.fx.explosions.lavaEruption(x, y),
+      playSound: (name, vol, x, y) => {
+        this.audio.playNamed(name, { volume: vol / FULL_VOLUME, x, y })
+      },
+      remove: (prop) => this.retireProp(prop),
+    })
 
     this.powerHost = new CopPowerHost(this.player, this.fx)
     this.powers = new Powers(this.powerHost, {
@@ -438,6 +466,7 @@ export class World {
     this.rideLifts()
     this.updateForceFields()
     this.updateBoulders()
+    this.hazards.update()
     this.useTeleporters(activating)
     this.useTeleportDoors(activating)
     this.useConsoles(activating)
@@ -544,7 +573,15 @@ export class World {
    */
   private fireEnemyShot(shot: EnemyShot): void {
     const shooter = shot.shooter ? (this.combatantOf.get(shot.shooter) ?? null) : null
-    this.projectiles.fireObject(shot.aitype, shot.x, shot.y, shot.angle, shooter, this.playerTarget)
+    this.projectiles.fireObject(
+      shot.aitype,
+      shot.x,
+      shot.y,
+      shot.angle,
+      shooter,
+      this.playerTarget,
+      shot.velocity,
+    )
   }
 
   /** What a dead monster leaves behind - `ai_ammo` in lisp/guns.lsp. */
@@ -593,6 +630,21 @@ export class World {
   private addActor(prop: Prop): void {
     this.propLayer.addChild(prop.sprite)
     if (prop.hurtable) this.addCombatant(prop)
+  }
+
+  /**
+   * Takes a prop out of the world at once, the way a script returning nil
+   * does. `retireDead` handles the ordinary case, which is a death animation
+   * playing out; this is for the objects that simply cease - an air mine that
+   * has spent itself, a bomb that has gone off.
+   */
+  private retireProp(prop: Prop): void {
+    const index = this.props.indexOf(prop)
+    if (index >= 0) this.props.splice(index, 1)
+    this.propsByIndex.delete(prop.objectIndex)
+    const blocker = this.blockers.indexOf(prop)
+    if (blocker >= 0) this.blockers.splice(blocker, 1)
+    this.removeActor(prop)
   }
 
   private removeActor(prop: Prop): void {
@@ -695,6 +747,13 @@ export class World {
         return explosions.rob1Death(x, y)
 
       case 'BOLDER':
+        // `bolder_ai` scatters five SMALL_BOLDERs with authored velocities;
+        // they bounce off walls and burst on the first floor they land on.
+        for (const [vx, vy] of CHUNK_VELOCITIES) {
+          const chunk = new SmallBoulder(this.assets, x, y, vx, vy)
+          this.smallBoulders.push(chunk)
+          this.propLayer.addChild(chunk.sprite)
+        }
         return explosions.boulderDeath(x, middle)
 
       default:
@@ -813,8 +872,18 @@ export class World {
    * goes non-zero, then fall, bounce and hurt whatever they roll over.
    */
   private updateBoulders(): void {
-    for (const boulder of this.boulders) {
-      if (boulder.isDying || boulder.isDead) continue
+    for (let b = this.boulders.length - 1; b >= 0; b--) {
+      const boulder = this.boulders[b]
+      if (boulder.isDying || boulder.isDead) {
+        // Shot apart: run the corpse timer out, then let go of the sprite.
+        // `retireDead` never sees a boulder - it was taken out of `props`.
+        boulder.tickLifetime()
+        if (boulder.isDead) {
+          this.boulders.splice(b, 1)
+          this.removeActor(boulder)
+        }
+        continue
+      }
 
       const hanging = !boulder.isReleased
       const events = boulder.update((index) => this.logic.isOn(index))
@@ -838,6 +907,18 @@ export class World {
           null,
           events.hurt.push,
         )
+      }
+    }
+
+    for (let i = this.smallBoulders.length - 1; i >= 0; i--) {
+      const chunk = this.smallBoulders[i]
+      const burst = chunk.update(this.level)
+      if (burst) {
+        this.fx.explosions.smallBoulderLanding(burst.x, burst.y, null)
+      }
+      if (chunk.isSpent) {
+        this.smallBoulders.splice(i, 1)
+        chunk.sprite.destroy()
       }
     }
   }
@@ -1250,7 +1331,14 @@ export class World {
     const bottom = cameraY + viewH + margin
 
     let visible = 0
-    for (const prop of [...this.props, ...this.teleporters, ...this.teleportDoors, ...this.enemies.members]) {
+    for (const prop of [
+      ...this.props,
+      ...this.teleporters,
+      ...this.teleportDoors,
+      ...this.enemies.members,
+      ...this.boulders,
+      ...this.smallBoulders,
+    ]) {
       if (prop.x < left || prop.x > right || prop.y < top || prop.y > bottom) {
         prop.sprite.visible = false
         continue
@@ -1275,7 +1363,15 @@ export class World {
   get propCounts(): { visible: number; total: number } {
     return {
       visible: this.visibleProps,
-      total: this.props.length + this.teleporters.length + this.enemies.members.length,
+      // Everything `updateProps` walks, so the two halves agree. The doors and
+      // the boulders were missing, which let the visible count exceed the total.
+      total:
+        this.props.length +
+        this.teleporters.length +
+        this.teleportDoors.length +
+        this.enemies.members.length +
+        this.boulders.length +
+        this.smallBoulders.length,
     }
   }
 

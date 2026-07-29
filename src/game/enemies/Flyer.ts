@@ -80,15 +80,21 @@ export class Flyer extends Enemy {
     this.halfWidth = 10
     this.height = 20
 
-    // These five all live in the level's lvars block, which the converter does
-    // not read, so the constructor's values stand unless something passes
-    // better ones. The levels agree with the defaults far more often than not:
-    // 177 of 234 flyers keep fire_delay 20, 207 keep max_xvel 10.
-    this.fireDelay = overrides.fireDelay !== undefined ? ticks(overrides.fireDelay) : FLYER.fireDelay
-    this.burstDelay = overrides.burstDelay !== undefined ? ticks(overrides.burstDelay) : FLYER.burstDelay
-    this.burstTotal = overrides.burstTotal ?? FLYER.burstTotal
-    this.maxXvel = overrides.maxXvel !== undefined ? speed(overrides.maxXvel) : FLYER.maxXvel
-    this.maxYvel = overrides.maxYvel !== undefined ? speed(overrides.maxYvel) : FLYER.maxYvel
+    // These five come from the level's saved lvars, falling back to
+    // `flyer_cons`. Most flyers agree with the constructor anyway - 177 of 234
+    // keep fire_delay 20, 207 keep max_xvel 10 - but the ones that do not are
+    // the fast, aggressive ones the later levels are built around.
+    const lvars = data.lvars ?? {}
+    const fireDelay = overrides.fireDelay ?? lvars.fire_delay
+    const burstDelay = overrides.burstDelay ?? lvars.burst_delay
+    const maxXvel = overrides.maxXvel ?? lvars.max_xvel
+    const maxYvel = overrides.maxYvel ?? lvars.max_yvel
+
+    this.fireDelay = fireDelay ? ticks(fireDelay) : FLYER.fireDelay
+    this.burstDelay = burstDelay ? ticks(burstDelay) : FLYER.burstDelay
+    this.burstTotal = overrides.burstTotal ?? lvars.burst_total ?? FLYER.burstTotal
+    this.maxXvel = maxXvel ? speed(maxXvel) : FLYER.maxXvel
+    this.maxYvel = maxYvel ? speed(maxYvel) : FLYER.maxYvel
 
     this.awake = data.aistate !== 0
     this.setState(this.awake ? 'running' : 'stopped', true)

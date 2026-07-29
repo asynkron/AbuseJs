@@ -1,6 +1,7 @@
 import type { GameAssets } from '../../assets/loader'
 import type { LevelObjectData } from '../../assets/types'
 import { Prop } from '../Prop'
+import { TICK_SCALE } from './tuning'
 import type { EnemyContext, EnemyShot, EnemySound, PlayerView } from './types'
 
 /**
@@ -42,6 +43,19 @@ export abstract class Enemy extends Prop {
    * get that answer without touching Entity.
    */
   private pictureIndex = 0
+
+  /**
+   * The original advanced `next_picture` once per 15Hz engine tick; we are
+   * called at 60Hz with everything else rescaled by TICK_SCALE, so a frame
+   * advances every 1/TICK_SCALE calls. This carries the fraction between
+   * calls. Without it, every animation-paced behaviour - the jugger throwing
+   * a grenade per walk cycle, the ant's fire_wait - ran 1.5x too fast even
+   * relative to the port's own sped-up clock.
+   */
+  private animCarry = 0
+
+  /** Whether the last `nextPicture` call actually stepped a frame on. */
+  private advancedFrame = false
 
   /** Ticks since the state or the AI state last changed - `state_time`. */
   protected stateTime = 0
@@ -109,6 +123,7 @@ export abstract class Enemy extends Prop {
     if (this.state !== previous || restart) {
       this.pictureIndex = 0
       this.stateTime = 0
+      this.animCarry = 0
     }
   }
 
@@ -121,13 +136,35 @@ export abstract class Enemy extends Prop {
    * `next_picture`: step one frame on, and report whether there was one. False
    * means the sequence just wrapped, which is how the scripts detect the end
    * of a one-shot animation.
+   *
+   * Called once per 60Hz tick but paced to the original's 15Hz clock (scaled):
+   * a frame only actually advances every 1/TICK_SCALE calls, and the ticks in
+   * between report "still going" without moving. Frame-triggered actions
+   * should check `frameJustAdvanced` so a held frame does not re-fire them.
    */
   protected nextPicture(): boolean {
     const count = this.frameCount
-    if (count <= 1) return false
+    if (count <= 1) {
+      this.advancedFrame = false
+      return false
+    }
+
+    this.animCarry += TICK_SCALE
+    if (this.animCarry < 1) {
+      this.advancedFrame = false
+      return true
+    }
+    this.animCarry -= 1
+
+    this.advancedFrame = true
     this.advanceAnimation(1)
     this.pictureIndex = (this.pictureIndex + 1) % count
     return this.pictureIndex !== 0
+  }
+
+  /** Whether the last `nextPicture` call actually moved to a new frame. */
+  protected get frameJustAdvanced(): boolean {
+    return this.advancedFrame
   }
 
   /** `current_frame`. */

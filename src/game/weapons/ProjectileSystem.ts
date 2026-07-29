@@ -25,6 +25,7 @@ import { ascatterLine, drawLine, rgb, scatterLine } from './lines'
 import { PROJECTILE_TYPE, ROCKET_SEARCH_RADIUS, WEAPON_SLOTS } from './definitions'
 import { motion, PROJECTILE_CHARACTER } from './Projectile'
 import type { Projectile, ProjectileKind } from './Projectile'
+import { DIFFICULTY, speed, ticks } from '../enemies/tuning'
 
 /**
  * Characters `def_char` never produced, so chars.json has no entry - the same
@@ -39,47 +40,54 @@ const MISSING_CHARACTERS: Readonly<Record<string, { file: string; frames: readon
   },
 }
 
+/**
+ * Every speed below is a velocity out of the scripts and so goes through
+ * `speed()`, and every lifetime through `ticks()` - the same conversion the
+ * creatures use. The two together preserve each weapon's *range*: a bullet at
+ * the original's 15 for 6 of its ticks and one at speed(15) for ticks(6) of
+ * ours both cover 90px, but only the converted one stays in proportion to the
+ * cop and the ants moving around it.
+ */
+
 /** The bullet ballistics of the three SHOTGUN_BULLET variants. */
 const BULLET_VARIANTS = {
   [PROJECTILE_TYPE.aiBullet]: {
-    lifetime: 6,
-    speed: 15,
+    lifetime: ticks(6),
+    speed: speed(15),
     bright: rgb(255, 255, 200),
     medium: rgb(150, 150, 0),
   },
   [PROJECTILE_TYPE.slowBullet]: {
-    lifetime: 40,
-    speed: 6,
+    lifetime: ticks(40),
+    speed: speed(6),
     bright: rgb(255, 128, 64),
     medium: rgb(255, 0, 0),
   },
   [PROJECTILE_TYPE.playerBullet]: {
-    lifetime: 6,
-    speed: 15,
+    lifetime: ticks(6),
+    speed: speed(15),
     bright: rgb(255, 0, 0),
     medium: rgb(150, 0, 0),
   },
 } as const
 
 /** `(set_course angle 20)` for both thrown weapons. */
-const THROW_SPEED = 20
-/** The plasma bolt's single step, and the light sabre's. */
+const THROW_SPEED = speed(20)
+/**
+ * The plasma bolt's single step, and the light sabre's. Both are distances
+ * rather than velocities - one `bmove` of that length, resolved on the tick it
+ * is fired - so neither converts.
+ */
 const PLASMA_RANGE = 200
 const SABRE_RANGE = 45
 const PLASMA_DAMAGE = 10
 const SABRE_DAMAGE = 30
 /** The disc leaves the hand at 25 and settles to its cruise speed at once. */
-const DISC_LAUNCH_SPEED = 25
-const ROCKET_START_SPEED = 5
+const DISC_LAUNCH_SPEED = speed(25)
+const ROCKET_START_SPEED = speed(5)
 /** `(if ... (isa_player) (setq max_speed 14) (setq max_speed 10))`. */
-const ROCKET_MAX_SPEED_PLAYER = 14
-const ROCKET_MAX_SPEED_AI = 10
-/**
- * STRAIT_ROCKET's speed is difficulty-scaled in strait_rocket_ai - easy 12,
- * medium 15, hard 17, extreme 22. There is no difficulty setting here, so
- * medium is used.
- */
-const STRAIT_ROCKET_SPEED = 15
+const ROCKET_MAX_SPEED_PLAYER = speed(14)
+const ROCKET_MAX_SPEED_AI = speed(10)
 
 /** The plasma beam's ramp: 255, 215, 175, 135, 95, 55 over its six ticks. */
 const PLASMA_FADE_STEP = 40
@@ -169,6 +177,7 @@ export class ProjectileSystem {
     angle: number,
     owner: ProjectileOwner | null,
     target: ProjectileTarget | null = null,
+    velocity?: { vx: number; vy: number },
   ): void {
     switch (type) {
       case PROJECTILE_TYPE.aiBullet:
@@ -177,7 +186,7 @@ export class ProjectileSystem {
         this.spawnBullet(type, x, y, angle, owner)
         break
       case PROJECTILE_TYPE.grenade:
-        this.spawnGrenade(x, y, angle, owner)
+        this.spawnGrenade(x, y, angle, owner, velocity)
         break
       case PROJECTILE_TYPE.rocket:
         this.spawnRocket(x, y, angle, owner, target)
@@ -304,16 +313,28 @@ export class ProjectileSystem {
     if (!bullet.alive) this.retire(bullet)
   }
 
-  private spawnGrenade(x: number, y: number, angle: number, owner: ProjectileOwner | null): void {
+  /**
+   * `velocity` overrides the angle-derived course for the one caller that sets
+   * its grenade's velocity by hand - see EnemyShot.velocity. Note it also
+   * skips inheriting the thrower's motion, because the jugger's assignment
+   * replaces rather than adds.
+   */
+  private spawnGrenade(
+    x: number,
+    y: number,
+    angle: number,
+    owner: ProjectileOwner | null,
+    velocity?: { vx: number; vy: number },
+  ): void {
     this.host.playSound('GRENADE_THROW', x, y)
-    const course = setCourse(angle, THROW_SPEED)
+    const course = velocity ?? setCourse(angle, THROW_SPEED)
     const grenade: Projectile = {
       kind: 'grenade',
       ...motion(x, y, owner, this.tick),
       // A thrown grenade carries the thrower's whole velocity, so running
       // forward throws further.
-      vx: course.vx + (owner?.vx ?? 0),
-      vy: course.vy + (owner?.vy ?? 0),
+      vx: course.vx + (velocity ? 0 : (owner?.vx ?? 0)),
+      vy: course.vy + (velocity ? 0 : (owner?.vy ?? 0)),
       frameIndex: frameForAngle(angle, this.frameCount('grenade')),
     }
     this.add(grenade)
@@ -440,7 +461,10 @@ export class ProjectileSystem {
       kind: 'straitRocket',
       ...motion(x, y, owner, this.tick),
       heading: normalizeAngle(angle),
-      speed: STRAIT_ROCKET_SPEED,
+      // `strait_rocket_ai` picks its speed by difficulty - easy 12, medium 15,
+      // hard 17, extreme 22 - and `hard` is what startup.lsp falls back to
+      // with no hardness.lsp to load, which is the case here.
+      speed: DIFFICULTY.straitRocketSpeed,
     })
   }
 

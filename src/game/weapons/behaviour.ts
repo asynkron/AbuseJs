@@ -20,6 +20,7 @@ import {
 } from './angles'
 import { bmove, findTargetInArea, moveUnderGravity } from './bmove'
 import type { MoveOutcome, ProjectileLevel, ProjectileTarget } from './bmove'
+import { accel, MAX_FALL, speed, ticks, TICK_SCALE } from '../enemies/tuning'
 import { blastSource, doDeathRayExplo, doExplo, doWhiteExplo, frameSkip, quickLight } from './blasts'
 import { firebombFlames, rocketExhaust } from './exhaust'
 import type { BlastContext } from './blasts'
@@ -49,11 +50,15 @@ export interface TickContext extends BlastContext {
 }
 
 /**
- * Gravity for the two projectiles that fall. Neither number is in the lisp -
- * the mover is engine-side - so both match the cop's in Player.ts, which keeps
- * a lobbed grenade arcing like a jump.
+ * Gravity for the two projectiles that fall.
+ *
+ * The engine adds 1 to yvel per 15Hz tick for a gravity object, so this is
+ * that acceleration in our units - and it has to be that, not the cop's
+ * hand-tuned 0.55, or the authored launch velocities arc to the wrong height:
+ * a grenade thrown at the original's 20 reaches 200px under `accel(1)` and
+ * 364px under 0.55, which is most of a screen too high.
  */
-const GRAVITY = { gravity: 0.55, maxFall: 12 }
+const GRAVITY = { gravity: accel(1), maxFall: MAX_FALL }
 
 /* ------------------------------------------------------------------ *
  * Machine gun - SHOTGUN_BULLET
@@ -68,9 +73,13 @@ function tickMachineGun(bullet: MachineGunBullet, ctx: TickContext): void {
   bullet.lastX = bullet.x
   bullet.lastY = bullet.y
 
-  // 20% per tick, integer - 18, 21, 25, 30, 37, 44px steps, about 175px of
-  // reach over the six ticks the player's variant lives.
-  bullet.speed = Math.trunc((bullet.speed * 6) / 5)
+  // 20% per *original* tick, so the per-tick factor carries the tick scale
+  // like any other rate. Over the nine of our ticks the player's variant lives
+  // that comes to about 150px of reach, which is what the original's six
+  // integer steps of 18, 21, 25, 30, 37, 44 covered. The truncation the lisp's
+  // fixed point imposed is dropped with it: the ladder is no longer integral
+  // in these units, and rounding it here would just lose range.
+  bullet.speed *= Math.pow(1.2, TICK_SCALE)
   const course = setCourse(bullet.angle, bullet.speed)
   bullet.vx = course.vx
   bullet.vy = course.vy
@@ -146,11 +155,14 @@ function tickGrenade(grenade: Grenade, ctx: TickContext): void {
  * ------------------------------------------------------------------ */
 
 const ROCKET_BLAST = { radius: 40, damage: 50 }
-/** `angle_add` caps at 23 degrees a tick, with nothing under 5. */
-const ROCKET_TURN = 23
+/**
+ * `angle_add` caps at 23 degrees per original tick, with nothing under 5. The
+ * cap is a rate and converts; the deadband is a tolerance and does not.
+ */
+const ROCKET_TURN = 23 * TICK_SCALE
 const ROCKET_DEADBAND = 5
-/** `(setq speed (+ speed 2))` until max_speed. */
-const ROCKET_ACCEL = 2
+/** `(setq speed (+ speed 2))` until max_speed - an acceleration. */
+const ROCKET_ACCEL = accel(2)
 /** It aims 15px below the target's origin, at the body rather than the feet. */
 const ROCKET_AIM_OFFSET = 15
 /** Fuse box once it is on top of what it locked onto. */
@@ -235,11 +247,11 @@ function tickPlasma(bolt: PlasmaBolt): void {
 /** `(hurt_radius (x) (y) 60 40 creator 10)`, every single tick. */
 const FIREBOMB_BLAST = { radius: 60, damage: 40, maxPush: 10 }
 /** `(< (state_time) 20)`. */
-const FIREBOMB_LIFETIME = 20
+const FIREBOMB_LIFETIME = ticks(20)
 /** Three ticks of grace before a stalled firebomb counts as finished. */
-const FIREBOMB_GRACE = 3
+const FIREBOMB_GRACE = ticks(3)
 /** `(abilities (walk_top_speed 20) (run_top_speed 20))` clamps the skid. */
-const FIREBOMB_TOP_SPEED = 20
+const FIREBOMB_TOP_SPEED = speed(20)
 
 function tickFirebomb(bomb: Firebomb, ctx: TickContext): void {
   // The flame comes first and unconditionally: a firebomb that dies this tick
@@ -273,9 +285,9 @@ function tickFirebomb(bomb: Firebomb, ctx: TickContext): void {
 
 const DISC_BLAST = { radius: 40, damage: 45 }
 /** `(set_course (aistate) 12)` - it launches at 25 and settles to 12 at once. */
-const DISC_SPEED = 12
+const DISC_SPEED = speed(12)
 /** The most it will turn in a tick. */
-const DISC_TURN = 35
+const DISC_TURN = 35 * TICK_SCALE
 /** get_fris_angle aims 4px above the crosshair. */
 const DISC_AIM_OFFSET = 4
 
@@ -377,8 +389,8 @@ function tickStraitRocket(rocket: StraitRocket, ctx: TickContext): void {
 const DEATH_RAY_BLAST = { radius: 50, damage: 40 }
 /** `(hurt_radius (x) (y) 30 20 (bg) 15)` as it travels. */
 const DEATH_RAY_AURA = { radius: 30, damage: 20, maxPush: 15 }
-const DEATH_RAY_SPEED = 6
-const DEATH_RAY_LIFETIME = 20
+const DEATH_RAY_SPEED = speed(6)
+const DEATH_RAY_LIFETIME = ticks(20)
 
 function tickDeathRay(ray: DeathRay, ctx: TickContext): void {
   const frames = ctx.frameCount('deathRay')

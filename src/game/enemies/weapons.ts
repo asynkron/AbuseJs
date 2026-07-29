@@ -9,9 +9,10 @@ import type { EnemyShot, EnemySound } from './types'
  * The same number picks an ant's tint, its health and its gun, which is why a
  * blue ant is dangerous and a green one is not.
  *
- * Nothing in this game travels - the cop's own eight weapons are hitscan
- * tracers - so each entry here is the payload and the look of the round rather
- * than a projectile. The damage figures are the originals; the flight is not.
+ * The rounds themselves are real projectiles - `World.fireEnemyShot` hands the
+ * aitype straight to `ProjectileSystem.fireObject`, the same call the cop's own
+ * trigger goes through - so what an entry here carries is the payload and the
+ * look of the round, and the flight belongs to src/game/weapons.
  */
 export interface EnemyWeapon {
   /** Damage to whatever it hits directly. */

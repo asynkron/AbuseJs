@@ -1,8 +1,8 @@
 import type { GameAssets } from '../../assets/loader'
 import type { LevelObjectData } from '../../assets/types'
-import { frameForAngle, normalizeAngle } from '../weapons/angles'
+import { frameForAngleFacing, normalizeAngle } from '../weapons/angles'
 import { Enemy, type Battlefield } from './Enemy'
-import { random, ticks } from './tuning'
+import { random, TICK_SCALE, ticks } from './tuning'
 import type { PlayerView } from './types'
 import { shotFrom } from './weapons'
 
@@ -25,11 +25,15 @@ import { shotFrom } from './weapons'
  * frames, the shared damage handler - is the same gun.
  */
 
-/** `spray_gun_cons` and `track_cons`. The levels override these through their
- *  lvars block, which the converter does not read yet, so these are what every
- *  gun in the game runs on for now. */
+/**
+ * `spray_gun_cons` and `track_cons` - the fallbacks for a gun whose level saved
+ * no vars. Every real gun overrides these from its own lvars block: the arcs
+ * especially, since a gun forced onto the default arc cannot aim at anything
+ * its level meant it to cover, and `track_set_angle` refuses to leave the arc
+ * rather than clamping to it.
+ */
 const SPRAY = {
-  fireDelay: ticks(4),
+  fireDelay: 4,
   angleSpeed: 10,
   startAngle: 270,
   endAngle: 350,
@@ -37,11 +41,12 @@ const SPRAY = {
 
 const TRACK = {
   turnSpeed: 1,
-  fireDelay: ticks(5),
+  fireDelay: 5,
   burstTotal: 3,
-  continueTime: ticks(8),
+  continueTime: 8,
   startAngle: 180,
   endAngle: 359,
+  angle: 270,
   /** `(< angle_add 5)` - close enough to the player to pull the trigger. */
   aimTolerance: 5,
   /** `(mod (+ angle (- 2 (random 5))) 360)` - the scatter on each round. */
@@ -75,11 +80,49 @@ export class Turret extends Enemy {
   /** Ticks the track gun spends looking away after emptying a burst. */
   private continueLeft = 0
 
+  /**
+   * The gun's own tuning, out of the level's saved lvars where it has them.
+   * The arcs are the important ones - `track_start_angle`/`track_end_angle`
+   * and `spray.start_angle`/`spray.end_angle` are what point a gun down a
+   * corridor rather than at the floor.
+   */
+  private readonly startAngle: number
+  private readonly endAngle: number
+  private readonly angleSpeed: number
+  private readonly fireDelay: number
+  private readonly burstTotal: number
+  private readonly continueTime: number
+  private readonly turnSpeed: number
+
   constructor(assets: GameAssets, data: LevelObjectData, objectIndex: number, world: Battlefield) {
     super(assets, data, objectIndex, world)
 
     this.tracking = data.type === 'TRACK_GUN'
-    this.angle = this.tracking ? 270 : SPRAY.startAngle
+    const lvars = data.lvars ?? {}
+
+    // `||` rather than `??`: the editor saves an unset var as 0, and a zero
+    // fire delay or arc is not a value any of these can use.
+    if (this.tracking) {
+      this.startAngle = lvars.track_start_angle ?? TRACK.startAngle
+      this.endAngle = lvars.track_end_angle ?? TRACK.endAngle
+      this.angle = lvars.angle ?? TRACK.angle
+      this.angleSpeed = SPRAY.angleSpeed
+      this.fireDelay = ticks(lvars.fire_delay || TRACK.fireDelay)
+      this.burstTotal = lvars.burst_total || TRACK.burstTotal
+      this.continueTime = ticks(lvars.continue_time || TRACK.continueTime)
+      // Degrees per original tick, so it converts like any other rate.
+      this.turnSpeed = (lvars.track_speed || TRACK.turnSpeed) * TICK_SCALE
+    } else {
+      this.startAngle = lvars['spray.start_angle'] ?? SPRAY.startAngle
+      this.endAngle = lvars['spray.end_angle'] ?? SPRAY.endAngle
+      this.angle = this.startAngle
+      this.angleSpeed = lvars['spray.angle_speed'] || SPRAY.angleSpeed
+      this.fireDelay = ticks(lvars['spray.fire_delay'] || SPRAY.fireDelay)
+      this.burstTotal = TRACK.burstTotal
+      this.continueTime = ticks(TRACK.continueTime)
+      this.turnSpeed = TRACK.turnSpeed * TICK_SCALE
+    }
+
     this.setState('stopped', true)
   }
 
@@ -129,7 +172,7 @@ export class Turret extends Enemy {
       case 'unfolding':
         if (this.nextPicture()) return true
         this.setState('spray.aim', true)
-        this.angle = SPRAY.startAngle
+        this.angle = this.startAngle
         this.aimBarrel()
         this.spray = 'sweepingDown'
         this.stateTime = 0
@@ -150,19 +193,19 @@ export class Turret extends Enemy {
    * something that aims.
    */
   private sweep(): boolean {
-    if (++this.stateTime <= SPRAY.fireDelay) return true
+    if (++this.stateTime <= this.fireDelay) return true
     this.stateTime = 0
 
     if (this.spray === 'sweepingDown') {
-      this.angle -= SPRAY.angleSpeed
-      if (this.angle <= SPRAY.startAngle) {
-        this.angle = SPRAY.startAngle
+      this.angle -= this.angleSpeed
+      if (this.angle <= this.startAngle) {
+        this.angle = this.startAngle
         this.spray = 'sweepingUp'
       }
     } else {
-      this.angle += SPRAY.angleSpeed
-      if (this.angle >= SPRAY.endAngle) {
-        this.angle = SPRAY.endAngle
+      this.angle += this.angleSpeed
+      if (this.angle >= this.endAngle) {
+        this.angle = this.endAngle
         // Back to aistate 0, which re-tests the sensor and starts down again.
         this.spray = 'off'
       }
@@ -195,7 +238,7 @@ export class Turret extends Enemy {
     // Emptying a burst leaves it looking the wrong way for a moment. That
     // pause is the only thing that makes a track gun survivable.
     if (this.continueLeft > 0) {
-      if (--this.continueLeft === 0) this.burstLeft = TRACK.burstTotal
+      if (--this.continueLeft === 0) this.burstLeft = this.burstTotal
       return true
     }
 
@@ -213,7 +256,7 @@ export class Turret extends Enemy {
     // The clockwise distance, then whichever way round is shorter.
     const clockwise = wanted < this.angle ? this.angle - wanted : this.angle + (360 - wanted)
     const shortest = clockwise > 180 ? 360 - clockwise : clockwise
-    const step = Math.min(shortest, TRACK.turnSpeed)
+    const step = Math.min(shortest, this.turnSpeed)
     this.turnTo(clockwise > 180 ? this.angle + step : this.angle - step)
 
     if (step < TRACK.aimTolerance) this.trackFire()
@@ -227,7 +270,8 @@ export class Turret extends Enemy {
    */
   private turnTo(next: number): void {
     const angle = normalizeAngle(next)
-    const { startAngle: start, endAngle: end } = TRACK
+    const start = this.startAngle
+    const end = this.endAngle
     const inside = start > end ? angle >= end && angle <= start : angle <= end && angle >= start
     if (inside) this.angle = angle
   }
@@ -236,10 +280,10 @@ export class Turret extends Enemy {
     this.shoot(TRACK_MUZZLE, normalizeAngle(this.angle + 2 - random(TRACK.spread)))
 
     if (this.burstLeft <= 1) {
-      this.continueLeft = TRACK.continueTime
+      this.continueLeft = this.continueTime
     } else {
       this.burstLeft--
-      this.fireDelayLeft = TRACK.fireDelay
+      this.fireDelayLeft = this.fireDelay
     }
 
     this.setState('firing')
@@ -250,7 +294,7 @@ export class Turret extends Enemy {
 
   /** `(set_frame_angle 0 359 angle)` over whichever 24-frame state is up. */
   private aimBarrel(): void {
-    this.setPicture(frameForAngle(this.angle, this.frameCount))
+    this.setPicture(frameForAngleFacing(this.angle, this.frameCount, this.direction))
   }
 
   /**

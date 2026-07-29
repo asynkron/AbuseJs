@@ -836,6 +836,11 @@ interface LevelObject {
   yvel: number
   xacel: number
   yacel: number
+  /**
+   * The object's saved script variables, by name - a JUGGER's `stationary`,
+   * a TRACK_GUN's `track_start_angle`. Omitted when the type declares none.
+   */
+  lvars?: Record<string, number>
 }
 
 function readObjects(spec: SpecFile, buf: Buffer): LevelObject[] {
@@ -863,6 +868,22 @@ function readObjects(spec: SpecFile, buf: Buffer): LevelObject[] {
     }
   }
 
+  // Per-type lvar name tables (src/level.cpp, "describe_lvars"): u16 count,
+  // then that many length-prefixed names, per type. These name the values in
+  // the "lvars" entry below, in the same order.
+  const lvarNames: string[][] = []
+  const lvarsDescEntry = spec.byName.get('describe_lvars')
+  if (lvarsDescEntry) {
+    let p = lvarsDescEntry.offset
+    for (let i = 0; i < typeCount; i++) {
+      const n = buf.readInt16LE(p)
+      p += 2
+      const list = readNameList(buf, p, n)
+      p = list.end
+      lvarNames.push(list.names)
+    }
+  }
+
   const count = buf.readUInt32LE(listEntry.offset)
   if (count === 0) return []
 
@@ -882,12 +903,38 @@ function readObjects(spec: SpecFile, buf: Buffer): LevelObject[] {
     }
   }
 
+  // The saved script variables ("lvars" in src/level.cpp): per object, a u16
+  // count followed by that many RC_32-tagged values. The count is the length
+  // of the object's type's describe_lvars list, so the two zip together. On
+  // load the engine writes these straight over the object's variables and the
+  // constructor never runs, so a saved zero is a real value, not an omission.
+  const lvarValues: (number[] | null)[] = new Array(count).fill(null)
+  const lvarsEntry = spec.byName.get('lvars')
+  if (lvarsEntry) {
+    try {
+      let p = lvarsEntry.offset
+      for (let i = 0; i < count; i++) {
+        const n = buf.readUInt16LE(p)
+        p += 2
+        const values: number[] = new Array(n)
+        for (let j = 0; j < n; j++) {
+          if (buf.readUInt8(p) !== RC_32) throw new Error('lvars: unexpected tag')
+          values[j] = buf.readInt32LE(p + 1)
+          p += 5
+        }
+        lvarValues[i] = values
+      }
+    } catch {
+      lvarValues.fill(null)
+    }
+  }
+
   const out: LevelObject[] = []
   for (let i = 0; i < count; i++) {
     const t = types[i]
     const typeName = typeNames[t] ?? `type_${t}`
     const stateList = stateNames[t]
-    out.push({
+    const object: LevelObject = {
       type: typeName,
       state: stateList?.[states[i]] ?? 'stopped',
       x: fields.x?.[i] ?? 0,
@@ -900,7 +947,17 @@ function readObjects(spec: SpecFile, buf: Buffer): LevelObject[] {
       yvel: fields.yvel?.[i] ?? 0,
       xacel: fields.xacel?.[i] ?? 0,
       yacel: fields.yacel?.[i] ?? 0,
-    })
+    }
+
+    const names = lvarNames[t]
+    const values = lvarValues[i]
+    if (names && values && names.length === values.length && names.length > 0) {
+      const lvars: Record<string, number> = {}
+      for (let j = 0; j < names.length; j++) lvars[names[j]] = values[j]
+      object.lvars = lvars
+    }
+
+    out.push(object)
   }
   return out
 }

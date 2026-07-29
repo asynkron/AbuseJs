@@ -63,9 +63,9 @@ export class Jugger extends Enemy {
 
   /**
    * A stationary jugger is a turret: it never walks and throws on a timer.
-   * The flag lives in the level's lvars, which the converter does not read -
-   * 21 of the 52 juggers in the core levels are turrets and there is no way to
-   * tell which from here, so all of them walk until that changes.
+   * The flag is the level's saved `stationary` lvar - 21 of the 52 juggers in
+   * the core levels are turrets, and treating those as walkers gave them the
+   * walk cycle's fire rate instead of their own much slower one.
    */
   private readonly stationary: number
 
@@ -92,10 +92,13 @@ export class Jugger extends Enemy {
     this.halfWidth = 16
     this.height = 44
 
-    this.stationary = overrides.stationary ?? 0
+    // The level's saved vars are the real tuning; the constructor's values in
+    // `jug_cons` are only the fallback for an object that saved none.
+    const lvars = data.lvars ?? {}
+    this.stationary = overrides.stationary ?? lvars.stationary ?? 0
     this.throwPeriod = ticks(data.aitype || 10)
-    this.throwXvel = speed(overrides.throwXvel ?? 13)
-    this.throwYvel = speed(overrides.throwYvel ?? -10)
+    this.throwXvel = speed(overrides.throwXvel ?? lvars.throw_xvel ?? 13)
+    this.throwYvel = speed(overrides.throwYvel ?? lvars.throw_yvel ?? -10)
 
     this.phase = PHASE_BY_AISTATE[data.aistate] ?? 'prepare'
   }
@@ -178,7 +181,9 @@ export class Jugger extends Enemy {
     const wasY = this.y
 
     if (this.nextPicture()) {
-      if (this.pictureAt === JUG.stompFrame) this.playSound('JSTOMP_SND')
+      if (this.frameJustAdvanced && this.pictureAt === JUG.stompFrame) {
+        this.playSound('JSTOMP_SND')
+      }
     } else {
       this.playSound('JSTOMP_SND')
       this.setState('weapon_fire')
@@ -195,10 +200,11 @@ export class Jugger extends Enemy {
   /**
    * The throw.
    *
-   * The original adds a real GRENADE object and then overrides its velocity to
-   * (throw_xvel * direction, throw_yvel), so the grenade arcs and bounces.
-   * Nothing here travels, so this leaves along the angle those velocities
-   * point in and carries the grenade's own 36 damage in a 40px radius.
+   * The original adds a real GRENADE object and then *overwrites* its velocity
+   * with (throw_xvel * direction, throw_yvel), so the grenade is lobbed rather
+   * than launched: 13 across and 10 up in the original's units, against the 20
+   * `fire_object` would have given it. The velocity goes along with the shot so
+   * the projectile system uses it instead of deriving one from the angle.
    */
   private throwGrenade(): void {
     if (this.stateTime <= JUG.windUp) {
@@ -211,7 +217,10 @@ export class Jugger extends Enemy {
     const angle = (Math.atan2(-vy, vx) * 180) / Math.PI
 
     this.playSound('GRENADE_THROW')
-    this.world.fire(shotFrom(JUG.grenadeType, this.x, this.y - JUG.grenadeY, angle, this))
+    this.world.fire({
+      ...shotFrom(JUG.grenadeType, this.x, this.y - JUG.grenadeY, angle, this),
+      velocity: { vx, vy },
+    })
     this.goPhase('recover')
   }
 
