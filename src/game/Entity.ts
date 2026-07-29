@@ -40,7 +40,7 @@ export class Entity implements Body {
   /** Baked colour variant to draw, when this character has any. */
   protected tintIndex: number | undefined
   private frames: Frame[] = []
-  private frameIndex = 0
+  protected frameIndex = 0
   private frameClock = 0
 
   constructor(

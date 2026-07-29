@@ -4,10 +4,10 @@ import type { Frame, GameAssets } from '../assets/loader'
 import type { InputState } from '../core/input'
 import { Entity } from './Entity'
 import { Level } from './Level'
-import { CLIMB_FRAME_PITCH, CLIMB_OFF_RANGE, CLIMB_OFF_RISE, CLIMB_SPEED } from './Ladders'
+import { CLIMB_OFF_RANGE, CLIMB_OFF_RISE, CLIMB_SPEED } from './Ladders'
 import { BASE_HEALTH_CAP, drawsTorso, scaleDamage, type PowerVisuals } from './powers'
 import { TORSO_FALLBACK, WEAPON_SLOTS, type WeaponSlot } from './weapons/index'
-import { isBlocked, isGrounded, moveAndCollide } from './collision'
+import { isGrounded, moveAndCollide } from './collision'
 
 /**
  * Our own platformer feel - not a reimplementation of Abuse's movement.
@@ -192,14 +192,7 @@ export class Player extends Entity {
   climbDepth: number | null = null
   /** Where the ladder pulls the cop to horizontally while climbing. */
   climbCentreX: number | null = null
-  /** The shaft's ends, so climbing cannot leave it. */
-  climbTop: number | null = null
-  climbBottom: number | null = null
 
-  /** Is there room for the cop to stand here, rather than inside something? */
-  private canStandAt(x: number, y: number): boolean {
-    return !isBlocked(this.level, { x, y, halfWidth: this.halfWidth, height: this.height })
-  }
 
   get isClimbing(): boolean {
     return this.state === 'climbing'
@@ -290,75 +283,69 @@ export class Player extends Entity {
    * used rather than as a second run cycle for sprinting.
    */
   /**
-   * Climbing, from `climb_handler` in lisp/people.lsp. Returns true while it
-   * owns the tick - the normal physics does not run at all on a ladder, which
-   * is why gravity never has to be turned off anywhere.
+   * Climbing - `climb_handler` in lisp/people.lsp, followed rather than
+   * reinterpreted.
    *
-   * Jumping leaves the ladder rather than being ignored: the original drops
-   * you off sideways when you press a direction with headroom, and a player
-   * who cannot get off a ladder with the jump key will try it anyway.
+   *   down: step the frame back, `(set_y (+ (y) 3))`
+   *   up:   `(if (< yd 32) (set_state climb_off)` else next frame and
+   *         `(set_y (- (y) 3))`
+   *   sideways: leave into a fall
+   *
+   * There are no bounds checks and nothing consults the terrain, which is
+   * deliberate: a ladder shaft is drawn open and the markers already say where
+   * it ends. Adding a grace margin at either end, a clamp to the shaft and a
+   * headroom test before stepping off - all tried here first - each fixed one
+   * report and caused the next.
+   *
+   * The one thing that genuinely keeps the cop on a 22px-wide ladder is the
+   * pull onto its centre line, `(set_x (/ (+ (x) (other x)) 2))`, which runs
+   * every tick he is climbing. Leaving it out is what let him drift three
+   * pixels wide of the shaft and strand himself.
+   *
+   * Returns true while it owns the tick, so the normal physics does not run
+   * and gravity never has to be turned off anywhere.
    */
   private updateClimb(input: InputState, jumpPressed: boolean): boolean {
     const depth = this.climbDepth ?? 0
 
     if (!this.isClimbing) {
-      // Grabbed with either direction: up from the foot of it, down from the
-      // lip at the top, which is where stepping off leaves you. Walking past
-      // must not stick, so a bare walk does not grab.
+      // The original enters `climbing` from the C++ mover rather than from
+      // climb_handler, so this much is ours: a direction press grabs on, and
+      // walking past does not.
       if (!input.up && !input.down) return false
       this.setState('climbing', true)
       this.vx = 0
       this.vy = 0
     }
 
+    // `(if (not (eq xm 0)) ... (set_state run_jump_fall))` - a sideways press
+    // leaves the ladder. Jump does the same, because a player who cannot get
+    // off with the jump key will try it anyway.
     if (jumpPressed || input.left || input.right) {
       this.setState('run_jump_fall', true)
       this.vy = 0
       return false
     }
 
+    const cycle = this.frameCount || 1
     if (input.up) {
-      // At the top the cop steps up onto it - but only if there is anywhere to
-      // step. Doing it unconditionally put him inside the platform capping the
-      // shaft, where the normal physics had no way to resolve him and the only
-      // way out was reloading.
-      if (depth < CLIMB_OFF_RANGE && this.canStandAt(this.x, this.y - CLIMB_OFF_RISE)) {
+      if (depth < CLIMB_OFF_RANGE) {
         this.y -= CLIMB_OFF_RISE
         this.setState('stopped', true)
         this.climbDepth = null
         return true
       }
-      // Bounded by the shaft the markers describe. Without this the cop kept
-      // going past the top of the ladder and through whatever was above it.
-      if (this.climbTop === null || this.y - CLIMB_SPEED > this.climbTop) {
-        this.y -= CLIMB_SPEED
-      }
+      this.setFrame((this.frameIndex + 1) % cycle)
+      this.y -= CLIMB_SPEED
     } else if (input.down) {
-      if (this.climbBottom === null || this.y + CLIMB_SPEED < this.climbBottom) {
-        this.y += CLIMB_SPEED
-      } else if (this.canStandAt(this.x, this.climbBottom)) {
-        // Off the bottom onto the floor, rather than stopping in mid-air.
-        this.y = this.climbBottom
-        this.setState('stopped', true)
-        this.climbDepth = null
-        return true
-      }
+      // `(if (eq (current_frame) 0) (set_current_frame 9) ...)` - the cycle
+      // runs backwards on the way down.
+      this.setFrame((this.frameIndex + cycle - 1) % cycle)
+      this.y += CLIMB_SPEED
     }
 
-    // The frame comes from how far up the ladder he is, not from a clock.
-    // `advanceAnimation` only ever counts forwards - its `while (clock >= 1)`
-    // cannot run backwards - so driving it with a negative amount froze the
-    // picture on the way down. Position drives it, and it reads correctly in
-    // both directions for free.
-    const cycle = this.frameCount || 1
-    this.setFrame(
-      ((Math.floor(-this.y / CLIMB_FRAME_PITCH) % cycle) + cycle) % cycle,
-    )
-
-    // `latter_check_area` recentres a climbing cop between the two markers.
-    if (this.climbCentreX !== null) {
-      this.x += Math.max(-2, Math.min(2, this.climbCentreX - this.x))
-    }
+    // `latter_check_area` sets this every tick, not gradually.
+    if (this.climbCentreX !== null) this.x = this.climbCentreX
 
     this.vx = 0
     this.vy = 0

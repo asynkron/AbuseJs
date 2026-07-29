@@ -1,80 +1,74 @@
 import type { LevelObjectData } from '../assets/types'
 
 /**
- * Ladders.
+ * Ladders, as `lisp/ladder.lsp` describes them.
  *
  * `LADDER` draws with `dev_draw`, so the object is an invisible marker and the
- * rungs you see are ordinary tiles. The marker and the object it links to are
- * two opposite corners of a rectangle: `latter_check_area` in lisp/ladder.lsp
- * tests the player against both and, when inside, records how far below the
- * top they are. That distance is the whole interface - `climb_handler` in
- * people.lsp reads it and nothing else.
+ * rungs you see are ordinary tiles. They come in pairs: the marker carrying a
+ * link is the top-left corner and the `LADDER` it points at - which has no
+ * link of its own - is the bottom-right.
  *
- * Climbing is not physics. The cop moves 3px a tick under direct control with
- * gravity suspended, steps off at the top when within 32px of it, and leaves
- * sideways into a fall if there is headroom.
+ * `latter_check_area` is a plain point-in-rectangle test on the player's
+ * anchor, with no tolerance of any kind:
+ *
+ *   (<= (x) player.x)      (<= (y) player.y)
+ *   (>= other.x player.x)  (>= other.y player.y)
+ *
+ * What keeps you from drifting out of a 22px-wide shaft is not slack in that
+ * test - it is that a climbing cop is pulled onto the centre line every tick,
+ * `(set_x (/ (+ (x) (other x)) 2))`. Widening the test instead, which is what
+ * was tried here first, only papers over a missing pull and then strands you
+ * somewhere else.
  */
 
 /** Pixels per tick, up or down - `(set_y (+ (y) 3))` in climb_handler. */
 export const CLIMB_SPEED = 3
-/** Within this of the top, pressing up steps off instead of climbing. */
+/** Within this of the top, pressing up steps off - `(if (< yd 32) ...)`. */
 export const CLIMB_OFF_RANGE = 32
 /** How far stepping off lifts the cop - `(set_y (- (y) 28))`. */
 export const CLIMB_OFF_RISE = 28
 /** Pixels of climb per frame of the ten-frame `4lad` cycle. */
 export const CLIMB_FRAME_PITCH = 6
-/**
- * Grace at the foot of a ladder.
- *
- * The markers describe the shaft, not the floor at the bottom of it, and the
- * floor is usually a few pixels lower - so standing at the foot of a ladder
- * put the cop just outside the box and the ladder could not be grabbed at all
- * from the one place you always approach it from. The top needed the same
- * allowance for the same reason, and got CLIMB_OFF_RISE.
- */
-export const CLIMB_FOOT_GRACE = 34
 
 export interface Ladder {
-  /** The rectangle you can climb in, in world pixels. */
   readonly left: number
   readonly right: number
   readonly top: number
   readonly bottom: number
-  /** Where the cop is pulled to while climbing - the midpoint of the corners. */
+  /** `(/ (+ (x) (other x)) 2)` - where a climbing cop is held. */
   readonly centreX: number
 }
 
-/**
- * How far the player is below the top of the ladder they are on, or null when
- * they are not on one. Null and zero are meaningfully different: zero means
- * standing exactly at the top, still holding on.
- */
-export function climbDepth(ladders: readonly Ladder[], x: number, y: number): number | null {
-  for (const ladder of ladders) {
-    if (x < ladder.left || x > ladder.right) continue
-    // The lip above the top counts as on the ladder. `climb_off_handler` puts
-    // the cop CLIMB_OFF_RISE above it when he steps up, so without this the
-    // one place you always stand after climbing is the one place you cannot
-    // climb back down from.
-    if (y < ladder.top - CLIMB_OFF_RISE || y > ladder.bottom + CLIMB_FOOT_GRACE) continue
-    return y - ladder.top
-  }
-  return null
-}
-
-/** The ladder covering a point, for the horizontal pull. */
+/** The ladder the point is inside, or null. */
 export function ladderAt(ladders: readonly Ladder[], x: number, y: number): Ladder | null {
   for (const ladder of ladders) {
     if (x < ladder.left || x > ladder.right) continue
-    if (y < ladder.top - CLIMB_OFF_RISE || y > ladder.bottom + CLIMB_FOOT_GRACE) continue
+    if (y < ladder.top || y > ladder.bottom) continue
     return ladder
   }
   return null
 }
 
 /**
- * Builds the climbable rectangles. A marker with no link describes no area and
- * is dropped - `latter_ai` does the same with `(> (total_objects) 0)`.
+ * How far below the top of its ladder the point is, or null when it is on
+ * none.
+ *
+ * The original keeps this in `in_climbing_area` and reads 0 as "not on a
+ * ladder" - `(if (eq in_climbing_area 0) ...normal movement...)`. Standing
+ * exactly level with the top marker therefore leaves the ladder, which is its
+ * own quirk and is kept rather than smoothed over.
+ */
+export function climbDepth(ladders: readonly Ladder[], x: number, y: number): number | null {
+  const ladder = ladderAt(ladders, x, y)
+  if (!ladder) return null
+  const depth = y - ladder.top
+  return depth === 0 ? null : depth
+}
+
+/**
+ * Builds the climbable rectangles. A marker with no link is the far corner of
+ * another one's rectangle rather than a ladder of its own, and `latter_ai`
+ * skips it the same way with `(> (total_objects) 0)`.
  */
 export function buildLadders(objects: LevelObjectData[], links: number[][]): Ladder[] {
   const ladders: Ladder[] = []
