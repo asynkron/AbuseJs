@@ -70,14 +70,17 @@ const TOP_CHARACTER = 'MGUN_TOP'
 const TOP_BASELINE = 29
 
 /**
- * `if (q->direction<0) q->x+=4;` (src/cop.cpp:155). The shoulder the gun hangs
- * off is 4px further along when the cop faces left.
+ * The shoulder the gun hangs off is 4px further along when the cop faces left.
  *
- * It applies to the aim maths only. The original puts the shift back before
- * `o->x=q->x`, so the torso is drawn at the legs' own x either way - shifting
- * the sprite too made it jump sideways on every turn.
+ * Two separate functions apply it and both restore it afterwards, which makes
+ * them easy to mistake for each other: `top_ai` shifts the *legs'* x across the
+ * aim maths and puts it back before `o->x=q->x` (src/cop.cpp:155 and :186), so
+ * that one really is angles only. `top_draw` then shifts the *torso's* own x
+ * across the draw (src/cop.cpp:762-764), so it applies to the sprite as well.
+ * Reading only the first leaves the torso 4px to the left of the legs whenever
+ * he faces that way.
  */
-const TOP_AIM_NUDGE = 4
+const TOP_SHOULDER_NUDGE = 4
 
 /**
  * The scale `SET_FADE_COUNT` works on - `(draw_transparent count 16)`, where
@@ -307,7 +310,7 @@ export class Player extends Entity {
     // `lisp_atan2(q->y - iy - pointer_y, pointer_x - q->x - ix)` - the heading
     // from the arm's pivot to the crosshair (src/cop.cpp:165), measured from the
     // shoulder, which sits 4px along when he faces left.
-    const originX = this.x + (this.direction < 0 ? TOP_AIM_NUDGE : 0)
+    const originX = this.x + (this.direction < 0 ? TOP_SHOULDER_NUDGE : 0)
     const wanted = atan2Deg(this.y - AIM_PIVOT_Y - worldY, worldX - originX - AIM_PIVOT_X)
 
     // Pick the frame whose own heading is closest to that.
@@ -730,7 +733,12 @@ export class Player extends Entity {
     this.topSprite.visible = !this.isDead && drawsTorso(this.state)
     this.topSprite.texture = frame.texture
 
-    const x = this.prevX + (this.x - this.prevX) * alpha
+    // `o->x=bot->x; if (bot->direction<0) o->x+=4;` (src/cop.cpp:762-764). The
+    // shoulder shift applies to where the torso is *drawn*, as well as to the
+    // aim maths in `top_ai`. Two functions, the same 4px, and each restores it
+    // afterwards - which is what makes them easy to mistake for one another.
+    const x =
+      this.prevX + (this.x - this.prevX) * alpha + (this.direction < 0 ? TOP_SHOULDER_NUDGE : 0)
     const y = this.prevY + (this.y - this.prevY) * alpha + TOP_BASELINE - bottom.height
 
     // `o->direction=1;  // always face right` (src/cop.cpp:153). The torso is
@@ -770,7 +778,7 @@ export class Player extends Entity {
     // of the old evenly-divided frame lookup. The shoulder shift applies here
     // too, since this is the same `q->x + fb[0]` the angle was measured from.
     const offset = MUZZLE_OFFSETS[this.topFrameIndex] ?? MUZZLE_OFFSETS[0]
-    const originX = this.x + (this.direction < 0 ? TOP_AIM_NUDGE : 0)
+    const originX = this.x + (this.direction < 0 ? TOP_SHOULDER_NUDGE : 0)
     return { x: originX + offset[0], y: this.y - offset[1] }
   }
 
