@@ -40,6 +40,8 @@ uniform float uIntensity;
 uniform vec2 uScreenSize;
 uniform float uBrightness;
 uniform float uContrast;
+uniform float uRoundness;
+uniform float uPixelSize;
 
 // --- constants, in the original's 960x540 present space ---
 const float CURVE          = 9.0;    // px the image is squeezed at the edges
@@ -59,6 +61,23 @@ const float BAND_ALPHA     = 0.045;
 const float VIGNETTE_INNER = 0.45;
 const float VIGNETTE_OUTER = 0.95;
 const float VIGNETTE_ALPHA = 0.5;
+
+// Superellipse exponents the roundness slider sweeps between. 8 still reads as
+// a square - only the very corners are off - and 2 is a true circle.
+const float SQUIRCLE_SQUARE = 8.0;
+const float SQUIRCLE_ROUND  = 2.0;
+// How dark the gap between dots goes at full roundness. Below 1 so the picture
+// keeps some floor rather than dropping to black between pixels.
+const float DOT_DEPTH       = 0.85;
+// Average of the dot mask over one cell, which is what the brightness
+// compensation has to undo. Straight lines in the feather width, fitted to the
+// mask integrated numerically at each end - 1 - pi/4 is the right answer only
+// for a hard-edged circle, and the feather widens it by more than it looks:
+// at the widest setting a square already averages 0.29, not 0.02.
+const float GAP_SQUARE_BASE  = 0.026;
+const float GAP_SQUARE_SLOPE = 0.876;
+const float GAP_ROUND_BASE   = 0.218;
+const float GAP_ROUND_SLOPE  = 0.703;
 
 vec3 sampleScene(vec2 frameUv) {
     // Outside the tube there is nothing behind the glass.
@@ -125,6 +144,36 @@ void main() {
     float grilleAlpha = col < 2.0 ? GRILLE_ALPHA : GRILLE_ALPHA_B;
     color = mix(color, tint, grilleAlpha);
 
+    // --- pixel roundness --------------------------------------------------
+    // Shapes each *game* pixel, so it needs uPixelSize rather than the grille's
+    // uGridPeriod - those are the same thing only at zoom 3 and above.
+    //
+    // A superellipse, |x|^n + |y|^n = 1: n large is a square with the corners
+    // barely off, n = 2 is a circle. Sweeping the exponent rather than mixing
+    // in a circle keeps every intermediate value a real shape instead of a
+    // cross-fade between two, so the slider reads as one dial being turned.
+    //
+    // Carving gaps costs light, so the level is put back below - see there.
+    if (uRoundness > 0.0 && uPixelSize >= 2.0) {
+        vec2 cell = fract(frag / uPixelSize) * 2.0 - 1.0;
+        float n = mix(SQUIRCLE_SQUARE, SQUIRCLE_ROUND, uRoundness);
+        float d = pow(pow(abs(cell.x), n) + pow(abs(cell.y), n), 1.0 / n);
+        // Feather over roughly a device pixel so a dot has an edge rather than
+        // a staircase, but kept narrow: a wide ramp shades most of the cell
+        // instead of just its corners, and the picture goes out with it.
+        float feather = clamp(1.2 / uPixelSize, 0.05, 0.3);
+        float mask = smoothstep(1.0 - feather, 1.0, d);
+
+        // Carving gaps removes light, and a control labelled "round" that also
+        // dims is two controls. Divide the mask by its own average so the cell
+        // keeps the level it came in with, and only its shape changes.
+        float gap = mix(
+            GAP_SQUARE_BASE + GAP_SQUARE_SLOPE * feather,
+            GAP_ROUND_BASE + GAP_ROUND_SLOPE * feather,
+            uRoundness);
+        color *= (1.0 - uRoundness * DOT_DEPTH * mask) / (1.0 - uRoundness * DOT_DEPTH * gap);
+    }
+
     // --- slow rolling band ------------------------------------------------
     float bandSpan = size.y + 160.0 * px;
     float bandY = mod(uTime * BAND_SPEED * px, bandSpan) - 160.0 * px;
@@ -174,6 +223,10 @@ export interface CrtOptions {
   brightness?: number
   /** 1 = unchanged, pivoting around mid grey. Applied after the CRT pass. */
   contrast?: number
+  /** 0 square, 1 round. See the shader's pixel-roundness block. */
+  roundness?: number
+  /** One game pixel in device pixels - `zoom * resolution`. */
+  pixelSize?: number
 }
 
 export class CrtFilter extends Filter {
@@ -187,6 +240,8 @@ export class CrtFilter extends Filter {
       uScreenSize: { value: new Float32Array([960, 540]), type: 'vec2<f32>' },
       uBrightness: { value: options.brightness ?? 1.05, type: 'f32' },
       uContrast: { value: options.contrast ?? 1.21, type: 'f32' },
+      uRoundness: { value: options.roundness ?? 0, type: 'f32' },
+      uPixelSize: { value: options.pixelSize ?? 3, type: 'f32' },
     })
 
     super({
@@ -209,6 +264,8 @@ export class CrtFilter extends Filter {
       uGridPeriod: number
       uGlow: number
       uIntensity: number
+      uRoundness: number
+      uPixelSize: number
       uScreenSize: Float32Array
       uBrightness: number
       uContrast: number
@@ -227,6 +284,27 @@ export class CrtFilter extends Filter {
   /** Screen-space size of one scanline/grille cycle. See `crtGridPeriod`. */
   set gridPeriod(value: number) {
     this.uniforms.uGridPeriod = value
+  }
+
+  /**
+   * One game pixel in device pixels - `zoom * resolution`.
+   *
+   * Not `gridPeriod`: that is a scanline cycle, which is grown to at least
+   * three device pixels so the mask can draw at all. Rounding wants the real
+   * pixel, and switches itself off below two device pixels because there is
+   * nothing there to shape.
+   */
+  set pixelSize(value: number) {
+    this.uniforms.uPixelSize = value
+  }
+
+  /** 0 leaves pixels square; 1 makes them round. */
+  get roundness(): number {
+    return this.uniforms.uRoundness
+  }
+
+  set roundness(value: number) {
+    this.uniforms.uRoundness = Math.max(0, Math.min(1, value))
   }
 
   /**
