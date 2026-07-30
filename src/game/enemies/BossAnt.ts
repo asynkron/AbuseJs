@@ -1,7 +1,7 @@
 import type { GameAssets } from '../../assets/loader'
 import type { LevelObjectData } from '../../assets/types'
 import { Enemy, type Battlefield } from './Enemy'
-import { canSee } from './raycast'
+import { canSee, eyeY } from './raycast'
 import { random, ticks } from './tuning'
 import type { PlayerView } from './types'
 import { aimAngle, shotFrom } from './weapons'
@@ -212,7 +212,7 @@ export class BossAnt extends Enemy {
     const targetY = player.y - BOSS.aimHeight + player.vy * BOSS.leadTicksY
     const level = this.world.level
 
-    if (!canSee(level, this.x, this.y, muzzleX, muzzleY)) return
+    if (!canSee(level, this.x, eyeY(this.y), muzzleX, muzzleY)) return
     if (!canSee(level, muzzleX, muzzleY, targetX, targetY)) return
 
     this.world.fire(

@@ -1179,6 +1179,10 @@ export class World {
       const sound = door.update(this.player.x, this.player.y)
       if (sound) this.audio.playNamed(sound, { volume: 0.6, x: door.x, y: door.y })
 
+      // Runs whether or not the player is in this door: a door holding the
+      // player has to see the key come up to let go of them.
+      const willing = door.offer(activating)
+
       if (!door.covers(this.player.x, this.player.y)) continue
       if (!door.partner) continue
 
@@ -1186,11 +1190,15 @@ export class World {
         this.messages.prompt('Press down to step through')
         continue
       }
+      if (!willing) continue
 
       this.player.setPosition(door.partner.x, door.partner.y)
       this.player.vx = 0
       this.player.vy = 0
       this.riding = null
+      // The far door now holds the player, so holding the key down cannot
+      // bounce them straight back - `(with_object (get_object 0) (link_object player))`.
+      door.partner.claim()
       this.audio.playNamed('TELE_SND', { volume: 0.7, x: door.partner.x, y: door.partner.y })
       return
     }
@@ -1198,12 +1206,27 @@ export class World {
 
   private useTeleporters(activating: boolean): void {
     for (const pad of this.teleporters) {
-      const arrival = pad.update()
+      const { hold, arrival } = pad.update()
+
+      // The pad owns the player for the length of its animation: pinned in
+      // place, fading, and neither shooting nor able to be shot.
+      if (hold) {
+        this.player.setPosition(hold.x, hold.y)
+        this.player.vx = 0
+        this.player.vy = 0
+        this.riding = null
+        this.player.isTeleporting = true
+        this.player.teleportFade = hold.fade
+        continue
+      }
+
       if (arrival) {
         this.player.setPosition(arrival.x, arrival.y)
         this.player.vx = 0
         this.player.vy = 0
         this.riding = null
+        this.player.isTeleporting = false
+        this.player.teleportFade = 0
         continue
       }
 

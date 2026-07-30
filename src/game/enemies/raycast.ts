@@ -23,6 +23,24 @@ import type { Level } from '../Level'
  */
 const STEP = 2
 
+/**
+ * The row a body's own sight lines have to leave from.
+ *
+ * An object's `y` is its feet, but collision.ts treats a body as occupying
+ * `[y - height, y)` - the bottom edge is exclusive - so a body standing on a
+ * floor comes to rest with `y` exactly equal to the floor's top. That row is
+ * solid, and `isSolidAt` says so, which means a ray cast from `y` is blocked at
+ * its own origin: the cleaner robot's look-ahead never cleared, so it never
+ * took a step, and a grounded ant's feet-to-muzzle test never passed, so it
+ * never fired. The last row the object actually occupies is one above.
+ *
+ * The original has no equivalent because its `y` is the feet row itself, with
+ * the floor beginning at `y + 1`.
+ */
+export function eyeY(y: number): number {
+  return y - 1
+}
+
 /** True when a single world point sits inside something solid. */
 export function isSolidAt(level: Level, x: number, y: number): boolean {
   const cx = Math.floor(x / level.tileW)

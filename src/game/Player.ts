@@ -46,6 +46,14 @@ const TOP_BASELINE = 29
 const TOP_FLIP_NUDGE = 4
 
 /**
+ * The scale `SET_FADE_COUNT` works on - `(draw_transparent count 16)`, where
+ * the count is how much of the background shows through. A teleporter ramps it
+ * from 0 to 15 across its animation, so the cop thins out to almost nothing
+ * before he is set down at the far end (tp2_ai, lisp/duong.lsp).
+ */
+const TELEPORT_FADE_MAX = 16
+
+/**
  * Where the gun's muzzle sits for each of the torso's 24 aim frames, as
  * (x, right) / (y, up) offsets from the player's anchor.
  *
@@ -98,6 +106,15 @@ export class Player extends Entity {
   legStates: LegStateFilter = { legState: (base) => base }
 
   private invulnerable = 0
+
+  /**
+   * `is_teleporting` and its fade count, set by whichever teleporter has hold
+   * of him. Non-zero fade means a pad is running its animation over him: he
+   * cannot fire (src/cop.cpp:662), takes no damage (`bottom_damage` in
+   * lisp/people.lsp returns nil) and is drawn increasingly transparent.
+   */
+  isTeleporting = false
+  teleportFade = 0
   private deathTimer = 0
   /** Torso frames per weapon, resolved once. */
   private readonly topsByWeapon: Frame[][] = []
@@ -382,6 +399,8 @@ export class Player extends Entity {
    */
   hurt(amount: number): boolean {
     if (this.invulnerable > 0 || this.deathTimer > 0) return false
+    // `bottom_damage` refuses outright mid-teleport (lisp/people.lsp).
+    if (this.isTeleporting) return false
     // Already down and waiting to respawn. Without this a turret that keeps
     // shooting the body restarts the death timer every time it expires, and
     // the respawn never gets a tick to happen in.
@@ -410,6 +429,10 @@ export class Player extends Entity {
     this.magazines[0] = Math.max(this.magazines[0], STARTING_AMMO)
     this.deathTimer = 0
     this.invulnerable = HURT_INVULNERABLE
+    // Dying on a pad would otherwise leave him permanently faded and unable to
+    // fire; `restart_player` clears every one of these lvars in the original.
+    this.isTeleporting = false
+    this.teleportFade = 0
     this.setState('stopped', true)
   }
 
@@ -451,11 +474,14 @@ export class Player extends Entity {
     // Blink while invulnerable so a hit is visible.
     const blink = this.invulnerable > 0 && Math.floor(this.invulnerable / 4) % 2 === 1
     this.sprite.alpha = blink ? 0.35 : 1
+    // `SET_FADE_COUNT` while a teleporter has hold of him (tp2_ai).
+    if (this.teleportFade > 0) this.sprite.alpha *= 1 - this.teleportFade / TELEPORT_FADE_MAX
     this.topSprite.alpha = this.sprite.alpha
 
-    // `top_draw_state` (lisp/people.lsp) names the leg states the torso is
-    // drawn over. The powered sets are not among them, which is why the cop
-    // has no gun while FLY or FAST is held - nor on a ladder, once there is one.
+    // `top_draw` (src/cop.cpp) names the leg states the torso is drawn over.
+    // `drawsTorso` looks past a `fast_`/`fly_` prefix, because the original
+    // only swaps those in for the duration of one draw call - the cop keeps his
+    // gun while a power is held.
     this.topSprite.visible = !this.isDead && drawsTorso(this.state)
     this.topSprite.texture = frame.texture
 
@@ -548,6 +574,8 @@ export class Player extends Entity {
   tryFire(wantsToFire: boolean): { slot: number; spent: number } | null {
     if (this.fireCooldown > 0) this.fireCooldown--
     if (!wantsToFire || this.fireCooldown > 0) return null
+    // `if ((but&2) && !o->lvars[is_teleporting] ...)` - src/cop.cpp.
+    if (this.isTeleporting) return null
 
     const weapon = this.weaponSlot
     const dry = this.magazines[this.weapon] <= 0

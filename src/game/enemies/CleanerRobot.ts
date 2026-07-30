@@ -2,7 +2,7 @@ import type { GameAssets } from '../../assets/loader'
 import type { LevelObjectData } from '../../assets/types'
 import { Enemy, type Battlefield } from './Enemy'
 import { tryMove } from './motion'
-import { canSee } from './raycast'
+import { canSee, eyeY } from './raycast'
 import { speed, ticks } from './tuning'
 import type { PlayerView } from './types'
 
@@ -56,9 +56,12 @@ export class CleanerRobot extends Enemy {
     this.halfWidth = 20
     this.height = 45
 
-    // `rob_hiden` is an lvar and unreadable here, but the levels give it away
-    // anyway: a hidden robot was saved sitting in its `rob_hiding` frame.
-    this.hidden = data.state === 'rob_hiding'
+    // `rob_hiden`, straight from the level now that the lvars are read. The
+    // frame it was saved in is not a reliable stand-in: 80 of the 141 robots
+    // set the flag but only 32 were saved sitting in `rob_hiding`, so guessing
+    // from the state left 48 of them visible when they should have been
+    // waiting invisibly for their sensor.
+    this.hidden = (data.lvars?.rob_hiden ?? (data.state === 'rob_hiding' ? 1 : 0)) !== 0
 
     // ROB1 is one of the few characters whose speed really is in the object -
     // def_char maps its `xvel` field to ai_xvel, and the levels use 1 to 15.
@@ -123,8 +126,12 @@ export class CleanerRobot extends Enemy {
     // It has no gravity: each tick it simply tries to sink onto the floor.
     tryMove(this.world.level, this, 0, ROB.fallProbe)
 
+    // `(can_see (x) (y) (+ (x) (xvel) 23) (y) nil)` - a horizontal probe along
+    // its own feet, so it has to start on the last row the robot occupies
+    // rather than the floor row underneath it.
     const reach = this.direction * (this.walkSpeed + ROB.lookAhead)
-    if (canSee(this.world.level, this.x, this.y, this.x + reach, this.y)) {
+    const eye = eyeY(this.y)
+    if (canSee(this.world.level, this.x, eye, this.x + reach, eye)) {
       this.x += this.direction * this.walkSpeed
     }
 

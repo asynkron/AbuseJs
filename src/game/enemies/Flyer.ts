@@ -2,7 +2,7 @@ import type { GameAssets } from '../../assets/loader'
 import type { LevelObjectData } from '../../assets/types'
 import { Enemy, type Battlefield } from './Enemy'
 import { bounceMove } from './motion'
-import { canSee } from './raycast'
+import { canSee, eyeY } from './raycast'
 import { accel, oneIn, speed, ticks } from './tuning'
 import type { EnemyOverrides, PlayerView } from './types'
 import { aimAngle, shotFrom } from './weapons'
@@ -216,7 +216,7 @@ export class Flyer extends Enemy {
     const targetY = player.y - FLYER.aimHeight + player.vy * FLYER.leadTicksY
     const level = this.world.level
 
-    if (!canSee(level, this.x, this.y, muzzleX, muzzleY)) return
+    if (!canSee(level, this.x, eyeY(this.y), muzzleX, muzzleY)) return
     if (!canSee(level, muzzleX, muzzleY, targetX, targetY)) return
 
     if (this.burstLeft <= 1) this.fireTime = this.fireDelay

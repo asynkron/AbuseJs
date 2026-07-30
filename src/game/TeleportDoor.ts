@@ -12,7 +12,20 @@ import { Prop } from './Prop'
  *
  * It has no `can_block`, so standing in the opening is the point rather than
  * a mistake - which is exactly why nothing happening reads as a broken door.
- * The original never says a word about the key either.
+ *
+ * The key handling is the subtle part. `tpd_ai` does not debounce the action
+ * key with a timer; it parks the player on the *destination* door:
+ *
+ *   (if (has_object player)
+ *       (if (not (pressing_action_key)) (remove_object player))
+ *     (if (and (< (distx) 20) ... (pressing_action_key))
+ *         (progn (with_object (get_object 0) (link_object player))
+ *                (move the player to the other door))))
+ *
+ * so the door you arrive at is holding you, and a door that holds you does
+ * nothing at all until the key comes back up. Without that latch every tick
+ * with the key down teleports again and the player ping-pongs between the two
+ * ends, landing back where they started on any odd number of flips.
  */
 
 /** Slides open inside this box, from `(and (< (distx) 100) (< (disty) 80))`. */
@@ -21,6 +34,9 @@ const OPEN_RANGE_Y = 80
 /** ...and carries you across only inside this one. */
 const USE_RANGE_X = 20
 const USE_RANGE_Y = 30
+/** TP_DOOR_INVIS's tighter box - `tpdi_ai` uses 15 and 20. */
+const INVIS_USE_RANGE_X = 15
+const INVIS_USE_RANGE_Y = 20
 /** The five `door1..5` frames; `open_door` stops at frame 4. */
 const OPEN_FRAME = 4
 /** Frames per tick the shutter runs at. Not in the lisp - `open_door` steps
@@ -35,8 +51,18 @@ export class TeleportDoor extends Prop {
   private frame = 0
   private wasOpening = false
 
+  /**
+   * `(has_object player)` - this door is the one the player was last delivered
+   * to, and it will not send them anywhere until the action key is released.
+   */
+  private holding = false
+
+  /** TP_DOOR_INVIS has no shutter and a tighter mouth. */
+  private readonly invisible: boolean
+
   constructor(assets: GameAssets, data: LevelObjectData, objectIndex: number) {
     super(assets, data, objectIndex)
+    this.invisible = data.type === 'TP_DOOR_INVIS'
     this.setState('stopped', true)
     this.setFrame(0)
   }
@@ -47,7 +73,44 @@ export class TeleportDoor extends Prop {
 
   /** True while the player is inside the part that actually teleports. */
   covers(x: number, y: number): boolean {
-    return Math.abs(x - this.x) < USE_RANGE_X && Math.abs(y - this.y) < USE_RANGE_Y
+    const rangeX = this.invisible ? INVIS_USE_RANGE_X : USE_RANGE_X
+    const rangeY = this.invisible ? INVIS_USE_RANGE_Y : USE_RANGE_Y
+    return Math.abs(x - this.x) < rangeX && Math.abs(y - this.y) < rangeY
+  }
+
+  /**
+   * The key half of `tpd_ai`, run once per tick before anything asks whether
+   * this door will teleport. Returns true when it is willing to.
+   *
+   * `pressing` is the action key's current state, not an edge: the latch is
+   * what makes a held key harmless, exactly as the original's link does.
+   */
+  offer(pressing: boolean): boolean {
+    if (this.holding) {
+      // Still standing in the door that delivered them. Let go only when the
+      // key comes up, and never send them back in the meantime.
+      if (!pressing) this.holding = false
+      return false
+    }
+    return pressing
+  }
+
+  /** Called on the door the player has just been moved to. */
+  claim(): void {
+    this.holding = true
+  }
+
+  /**
+   * TP_DOOR_INVIS's draw_fun is `dev_draw`, so it is only ever visible in the
+   * editor. Its `stopped` frame is the `clone_icon` placeholder, which would
+   * otherwise be sitting in the level in plain sight.
+   */
+  override draw(alpha: number): void {
+    if (this.invisible) {
+      this.sprite.visible = false
+      return
+    }
+    super.draw(alpha)
   }
 
   private inRange(x: number, y: number): boolean {
@@ -60,6 +123,9 @@ export class TeleportDoor extends Prop {
    * the movement begins, not throughout.
    */
   update(playerX: number, playerY: number): 'DOOR_UP' | 'DOOR_DOWN' | null {
+    // `tpdi_ai` has no shutter at all - TP_DOOR_INVIS is a bare doorway.
+    if (this.invisible) return null
+
     // `other_door_opening`: a pair opens together, so walking up to one end
     // shows you the other. Without it you arrive through a shut door.
     const wants = this.inRange(playerX, playerY) || (this.partner?.inRange(playerX, playerY) ?? false)
@@ -79,7 +145,7 @@ export class TeleportDoor extends Prop {
   }
 }
 
-/** Builds the teleport doors and pairs them up from the level's links. */
+/** Builds the teleport doors, visible and invisible, and pairs them up. */
 export function buildTeleportDoors(
   assets: GameAssets,
   objects: LevelObjectData[],
@@ -90,7 +156,7 @@ export function buildTeleportDoors(
   const byIndex = new Map<number, TeleportDoor>()
 
   objects.forEach((object, index) => {
-    if (object.type !== 'TP_DOOR') return
+    if (object.type !== 'TP_DOOR' && object.type !== 'TP_DOOR_INVIS') return
     if (!assets.character(object.type)) return
 
     const door = new TeleportDoor(assets, object, index)

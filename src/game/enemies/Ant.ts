@@ -11,7 +11,7 @@ import {
   willFallIfJump,
   type MoveAbilities,
 } from './motion'
-import { canSee, seeDist } from './raycast'
+import { canSee, eyeY, seeDist } from './raycast'
 import { DIFFICULTY, GRAVITY, accel, oneIn, random, speed, ticks } from './tuning'
 import type { EnemyOverrides, PlayerView } from './types'
 import { aimAngle, ammoFor, shotFrom } from './weapons'
@@ -574,7 +574,7 @@ export class Ant extends Enemy {
    * which is what keeps a room of ants from becoming one continuous noise.
    */
   private screamCheck(player: PlayerView): void {
-    if (canSee(this.world.level, this.x, this.y, player.x, player.y)) {
+    if (canSee(this.world.level, this.x, eyeY(this.y), player.x, eyeY(player.y))) {
       if (this.noSeeTime === 0 || this.noSeeTime > ANT.screamGap) this.playSound('ASCREAM_SND')
       this.noSeeTime = 1
     } else {
@@ -603,7 +603,7 @@ export class Ant extends Enemy {
     const targetX = player.x + player.vx * ANT.leadTicksX
     const targetY = player.y - ANT.muzzleY + player.vy * ANT.leadTicksY
 
-    if (!canSee(level, this.x, this.y, muzzle.x, muzzle.y)) return
+    if (!canSee(level, this.x, eyeY(this.y), muzzle.x, muzzle.y)) return
     if (!canSee(level, muzzle.x, muzzle.y, targetX, targetY)) return
 
     const angle = aimAngle(muzzle.x, muzzle.y, targetX, targetY)

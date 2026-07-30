@@ -19,9 +19,13 @@ const POWERED_LEG_STATES: ReadonlySet<string> = new Set([
 ])
 
 /**
- * The leg states the torso is drawn over - `top_draw_state` in
- * lisp/people.lsp. Climbing, flinching, dying and the powered leg sets all
- * hide it, which is why the cop has no gun while he is on a ladder.
+ * The leg states the torso is drawn over - `top_draw` in src/cop.cpp, which is
+ * the live version of the commented-out `top_draw_state` in lisp/people.lsp.
+ * Climbing, flinching and dying hide it, which is why the cop has no gun while
+ * he is on a ladder.
+ *
+ * The `fast_` and `fly_` twins are deliberately not listed, and must not be:
+ * see `drawsTorso`.
  */
 const TORSO_LEG_STATES: ReadonlySet<string> = new Set([
   'stopped',
@@ -31,9 +35,36 @@ const TORSO_LEG_STATES: ReadonlySet<string> = new Set([
   'end_run_jump',
 ])
 
-/** True when the aiming torso belongs over these legs. */
+/** The prefixes `legStateFor` can put on a base state. */
+const POWER_PREFIXES = ['fast_', 'fly_'] as const
+
+/**
+ * Strips a power prefix back off, so a state can be tested as the base one.
+ *
+ * In the original the powered art is never a state the cop is *in*. `bottom_draw`
+ * saves `o->state`, swaps in `S_fast_running` or `S_fly_running` for the one
+ * `player_draw` call, and puts the old state straight back (src/cop.cpp, the
+ * FAST_POWER and FLY_POWER arms). The substitution lasts one draw and nothing
+ * else ever sees it.
+ */
+function baseLegState(legState: string): string {
+  for (const prefix of POWER_PREFIXES) {
+    if (legState.startsWith(prefix)) return legState.slice(prefix.length)
+  }
+  return legState
+}
+
+/**
+ * True when the aiming torso belongs over these legs.
+ *
+ * Tested against the base state, because this port keeps the powered variant in
+ * `state` rather than swapping it in for a single draw. `top_draw` in the
+ * original only ever sees the plain state, so holding a power has never hidden
+ * the cop's torso - and it must not, since he can still aim and fire while
+ * running fast or flying.
+ */
 export function drawsTorso(legState: string): boolean {
-  return TORSO_LEG_STATES.has(legState)
+  return TORSO_LEG_STATES.has(baseLegState(legState))
 }
 
 /**

@@ -3,21 +3,33 @@ import type { LevelObjectData } from '../assets/types'
 import { Prop } from './Prop'
 
 /**
- * A teleporter pad.
+ * A teleporter pad - TELE2, `tp2_ai` in lisp/duong.lsp.
  *
- * Ours, but wired from the level: a teleporter's link is the pad it sends you
- * to, and they are placed in pairs. Standing on one and pressing down runs its
- * spin animation and then puts you down at the other, 16px above its own y -
- * the offset `tp2_ai` uses in lisp/duong.lsp.
+ * A pad's link is the pad it sends you to, and they are placed in pairs.
+ * Standing on one and pressing down starts its fifteen-frame `elec` animation,
+ * and for as long as that runs the pad owns the player:
+ *
+ *   (with_object (get_object 1)
+ *      (progn (set_x x) (set_y (- y 16))
+ *             (user_fun SET_FADE_COUNT fade)
+ *             (setq is_teleporting 1)))
+ *
+ * - pinned to the pad, faded out a step at a time, and unable to shoot or be
+ * shot. Only when the animation runs out is the player put down at the far pad
+ * with the fade cleared. Without the pinning and the fade the cop just stands
+ * there and then jumps across, which is what made the trip look like nothing
+ * had happened.
  */
 
-/** Where the rider ends up relative to the destination pad's anchor. */
+/** Where the rider stands relative to a pad's anchor, going and arriving. */
 const ARRIVAL_LIFT = 16
 /** How close the player has to be to use one. */
 const REACH_X = 22
 const REACH_Y = 36
 /** Frames per second for the spin. */
 const SPIN_FPS = 20
+/** `(if (< (current_frame) 16) (current_frame) 15)` - the fade tops out here. */
+const FADE_CAP = 15
 
 export class Teleporter extends Prop {
   private charging = false
@@ -57,20 +69,45 @@ export class Teleporter extends Prop {
   }
 
   /**
-   * Advances the spin. Returns the arrival point on the tick it completes, so
-   * the caller can move whoever is standing here.
+   * Advances the spin.
+   *
+   * While it runs, `hold` is where the pad wants the player and how far faded
+   * out they should be. On the tick it finishes, `arrival` is the far pad -
+   * which is also the tick the fade is cleared.
    */
-  update(): { x: number; y: number } | null {
-    if (!this.charging) return null
+  update(): TeleportProgress {
+    if (!this.charging) return { hold: null, arrival: null }
 
     this.elapsed++
     this.advanceAnimation(SPIN_FPS / 60)
-    if (this.elapsed < this.spinTicks) return null
+
+    if (this.elapsed < this.spinTicks) {
+      // `(if (< (current_frame) 16) (current_frame) 15)`, except the count has
+      // to come off the pad's progress rather than its frame index: at 60Hz the
+      // fifteen frames are stepped a third of a frame at a time, so reading the
+      // index back would hold each fade step for three ticks and stall near 0.
+      const fade = Math.min(FADE_CAP, Math.round((this.elapsed / this.spinTicks) * FADE_CAP))
+      return {
+        hold: { x: this.x, y: this.y - ARRIVAL_LIFT, fade },
+        arrival: null,
+      }
+    }
 
     this.charging = false
     this.setState('stopped', true)
-    return { x: this.destination.x, y: this.destination.y - ARRIVAL_LIFT }
+    return {
+      hold: null,
+      arrival: { x: this.destination.x, y: this.destination.y - ARRIVAL_LIFT },
+    }
   }
+}
+
+/** What a pad wants done with the player this tick. */
+export interface TeleportProgress {
+  /** Where to pin them and how far to fade them, while the pad is running. */
+  hold: { x: number; y: number; fade: number } | null
+  /** Where to put them down, on the tick the pad finishes. */
+  arrival: { x: number; y: number } | null
 }
 
 /** Builds the teleporters in a level, dropping the inert props they replace. */
