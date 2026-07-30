@@ -232,6 +232,22 @@ export abstract class Enemy extends Prop {
     return this.direction === this.toward(player)
   }
 
+  /**
+   * Contact damage, applied at the engine's rate rather than ours.
+   *
+   * The original's frame damage lands once per 15Hz tick while the boxes
+   * overlap. Calling it on every one of our ticks would be four times the
+   * damage - which the old 30-tick invulnerability window was hiding.
+   */
+  protected touchDamage(amount: number): void {
+    this.contactCarry += TICK_SCALE
+    if (this.contactCarry < 1) return
+    this.contactCarry -= 1
+    this.world.hurtPlayer(amount)
+  }
+
+  private contactCarry = 0
+
   protected playSound(sound: EnemySound): void {
     this.world.playSound(sound, this.x, this.y)
   }

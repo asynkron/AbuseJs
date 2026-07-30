@@ -257,7 +257,7 @@ export class Ant extends Enemy {
     } while (this.replay && passes-- > 0)
 
     if (DIVE_STATES.has(this.state) && this.touching(player)) {
-      this.world.hurtPlayer(ANT.contactDamage)
+      this.touchDamage(ANT.contactDamage)
     }
 
     return true

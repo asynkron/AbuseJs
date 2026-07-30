@@ -8,7 +8,7 @@ import { CLIMB_OFF_RANGE, CLIMB_OFF_RISE, CLIMB_SPEED } from './Ladders'
 import { BASE_HEALTH_CAP, drawsTorso, scaleDamage, type PowerVisuals } from './powers'
 import { atan2Deg, TORSO_FALLBACK, WEAPON_SLOTS, type WeaponSlot } from './weapons/index'
 import { isGrounded, moveAndCollide } from './collision'
-import { accel, GRAVITY, MAX_FALL, speed, ticks } from './enemies/tuning'
+import { accel, GRAVITY, MAX_FALL, speed, TICK_SCALE, ticks } from './enemies/tuning'
 
 /**
  * The cop's movement, from `def_char DARNEL`'s abilities (lisp/people.lsp:583-592)
@@ -129,8 +129,23 @@ const WEAPON_SWITCH_DELAY = ticks(2)
 const OBJECT_SUPPORT_TICKS = ticks(1)
 /** Rounds the cop starts a level with. */
 const STARTING_AMMO = 50
-/** Ticks of invulnerability after being hit, so one turret cannot chain-kill. */
-const HURT_INVULNERABLE = ticks(8)
+/**
+ * `bottom_damage`'s red flash: `r_ramp += amount * 7`, capped at 120, decaying
+ * 7 per engine tick (lisp/people.lsp:348-353, src/cop.cpp:795-812).
+ *
+ * The g and b ramps in the script are dead - they only ever subtract from zero
+ * and are then clamped back to zero - so red is the whole of it. The engine
+ * adds it to every entry of the palette, so it tints the entire screen rather
+ * than the cop.
+ *
+ * There is no invulnerability window anywhere in `bottom_damage`. The port used
+ * to grant 30 ticks of complete immunity after any hit, which is not in the
+ * original at all; what stopped a monster chain-killing you was that its
+ * contact damage lands once per engine tick, which is now what happens.
+ */
+const HURT_RAMP_PER_DAMAGE = 7
+const HURT_RAMP_MAX = 120
+const HURT_RAMP_DECAY = 7
 /**
  * The cop stays down until the player asks to carry on.
  *
@@ -167,7 +182,11 @@ export class Player extends Entity {
    */
   legStates: LegStateFilter = { legState: (base) => base }
 
-  private invulnerable = 0
+  /**
+   * How red the screen is, 0..120. Set by a hit and decayed every tick; the
+   * world reads it to draw the flash.
+   */
+  hurtRamp = 0
   /** Down and waiting for the player to press on - not a timer. */
   private dead = false
 
@@ -223,9 +242,9 @@ export class Player extends Entity {
     return this.dead && this.deathTimer === 0
   }
 
-  /** Flashes while briefly invulnerable, so a hit reads. */
+  /** True while the hit flash is still fading. */
   get isHurt(): boolean {
-    return this.invulnerable > 0
+    return this.hurtRamp > 0
   }
 
   private coyote = 0
@@ -318,7 +337,10 @@ export class Player extends Entity {
 
     if (this.climbDepth !== null && this.updateClimb(input, jumpPressed)) return
 
-    if (this.invulnerable > 0) this.invulnerable--
+    // `bottom_draw` takes 7 off the ramp per engine tick, floor zero.
+    if (this.hurtRamp > 0) {
+      this.hurtRamp = Math.max(0, this.hurtRamp - HURT_RAMP_DECAY * TICK_SCALE)
+    }
 
     // Dead: settle to the floor and wait to be told to carry on.
     if (this.dead) {
@@ -495,7 +517,7 @@ export class Player extends Entity {
    * death animation and the respawn timer.
    */
   hurt(amount: number): boolean {
-    if (this.invulnerable > 0 || this.dead) return false
+    if (this.dead) return false
     // `bottom_damage` refuses outright mid-teleport (lisp/people.lsp).
     if (this.isTeleporting) return false
     // Already down and waiting to respawn. Without this a turret that keeps
@@ -507,9 +529,18 @@ export class Player extends Entity {
     // else touches it (lisp/people.lsp). The default is hard, which is x1, so
     // this changes nothing today - it names the multiplier rather than leaving
     // it implicit.
-    this.health = Math.max(0, this.health - scaleDamage(amount))
-    this.invulnerable = HURT_INVULNERABLE
-    if (this.health > 0) return false
+    const scaled = scaleDamage(amount)
+    this.health = Math.max(0, this.health - scaled)
+
+    // The screen flash, and the wince. `(if (eq (random 2) 0) flinch_up
+    // flinch_down)` - and the torso is not drawn over either, which is what
+    // makes a hit read even without the flash.
+    this.hurtRamp = Math.min(HURT_RAMP_MAX, this.hurtRamp + scaled * HURT_RAMP_PER_DAMAGE)
+    if (this.health > 0) {
+      const wince = Math.random() < 0.5 ? 'flinch_up' : 'flinch_down'
+      if (this.assets.hasState(this.character, wince)) this.setState(wince, true)
+      return false
+    }
 
     if (this.assets.hasState(this.character, 'dead')) this.setState('dead', true)
     this.dead = true
@@ -527,7 +558,6 @@ export class Player extends Entity {
     this.magazines[0] = Math.max(this.magazines[0], STARTING_AMMO)
     this.dead = false
     this.deathTimer = 0
-    this.invulnerable = HURT_INVULNERABLE
     // Dying on a pad would otherwise leave him permanently faded and unable to
     // fire; `restart_player` clears every one of these lvars in the original.
     this.isTeleporting = false
@@ -570,9 +600,7 @@ export class Player extends Entity {
       return
     }
 
-    // Blink while invulnerable so a hit is visible.
-    const blink = this.invulnerable > 0 && Math.floor(this.invulnerable / 4) % 2 === 1
-    this.sprite.alpha = blink ? 0.35 : 1
+    this.sprite.alpha = 1
     // `SET_FADE_COUNT` while a teleporter has hold of him (tp2_ai).
     if (this.teleportFade > 0) this.sprite.alpha *= 1 - this.teleportFade / TELEPORT_FADE_MAX
     this.topSprite.alpha = this.sprite.alpha

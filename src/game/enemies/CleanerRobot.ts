@@ -135,7 +135,7 @@ export class CleanerRobot extends Enemy {
       this.x += this.direction * this.walkSpeed
     }
 
-    if (this.touching(player)) this.world.hurtPlayer(ROB.contactDamage)
+    if (this.touching(player)) this.touchDamage(ROB.contactDamage)
     return true
   }
 

@@ -184,6 +184,15 @@ export class World {
   private readonly fieldGraphics = new Graphics()
 
   /**
+   * `bottom_draw`'s red flash, in screen space.
+   *
+   * The engine adds `r_ramp` to the red channel of every palette entry, so a
+   * hit reddens the whole view rather than the cop. An additive red fill over
+   * the finished frame is the nearest thing here.
+   */
+  readonly hurtFlash = new Graphics({ blendMode: 'add' })
+
+  /**
    * Props that are solid without the logic having an opinion - the hidden
    * walls, mostly, which stand in the middle of a corridor looking like part
    * of it. Collision is tile-based, so without this you walk through them.
@@ -1451,6 +1460,13 @@ export class World {
       camera.y,
       this.zoom,
     )
+
+    // The ramp is 0..120 on the palette's 0..255 red channel.
+    this.hurtFlash.clear()
+    if (this.player.hurtRamp > 0) {
+      this.hurtFlash.rect(0, 0, viewW * this.zoom, viewH * this.zoom)
+      this.hurtFlash.fill({ color: 0xff0000, alpha: this.player.hurtRamp / 255 })
+    }
 
     this.messages.layout(viewW, viewH, this.zoom)
     this.statusBar.setHealth(this.player.health)
