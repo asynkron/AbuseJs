@@ -45,6 +45,13 @@ export abstract class Enemy extends Prop {
   private pictureIndex = 0
 
   /**
+   * `(range x y)` - how far outside the view this creature still thinks.
+   * `add_actives` only wakes objects whose position, grown by this, meets the
+   * view grown by a quarter (src/level.cpp:216-257).
+   */
+  readonly range: readonly [number, number]
+
+  /**
    * The original advanced `next_picture` once per 15Hz engine tick; we are
    * called at 60Hz with everything else rescaled by TICK_SCALE, so a frame
    * advances every 1/TICK_SCALE calls. This carries the fraction between
@@ -82,6 +89,8 @@ export abstract class Enemy extends Prop {
     protected readonly world: Battlefield,
   ) {
     super(assets, data, objectIndex)
+
+    this.range = assets.range(data.type)
 
     // Levels store direction as a byte, so left-facing objects arrive as 255
     // rather than -1. Prop reads it as a signed number and lands on 1 for

@@ -1128,15 +1128,29 @@ export class World {
   private updateEnemies(): void {
     const player = this.player
 
-    this.enemies.update({
-      x: player.x,
-      y: player.y,
-      vx: player.vx,
-      vy: player.vy,
-      halfWidth: player.halfWidth,
-      height: player.height,
-      hidden: this.powers.concealment > SNEAKY_THRESHOLD,
-    })
+    // `f->xoff() - w/4 .. f->xoff() + w + w/4` - the view, grown a quarter
+    // each way, which is the box add_actives is given (src/game.cpp:1954).
+    const viewW = this.camera.viewWidth
+    const viewH = this.camera.viewHeight
+    const active = {
+      x1: this.camera.x - viewW / 4,
+      y1: this.camera.y - viewH / 4,
+      x2: this.camera.x + viewW + viewW / 4,
+      y2: this.camera.y + viewH + viewH / 4,
+    }
+
+    this.enemies.update(
+      {
+        x: player.x,
+        y: player.y,
+        vx: player.vx,
+        vy: player.vy,
+        halfWidth: player.halfWidth,
+        height: player.height,
+        hidden: this.powers.concealment > SNEAKY_THRESHOLD,
+      },
+      active,
+    )
 
   }
 

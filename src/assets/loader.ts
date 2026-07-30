@@ -183,6 +183,15 @@ export class GameAssets {
   }
 
   /** True when the character declares the given `(flags ...)` entry. */
+  /**
+   * `(range x y)` from def_char - how far outside the view an object still
+   * runs. 100x50 is the engine's default for a character that names none
+   * (src/chars.cpp:485).
+   */
+  range(character: string): readonly [number, number] {
+    return this.chars.characters[character]?.range ?? [100, 50]
+  }
+
   hasFlag(character: string, flag: string): boolean {
     return this.chars.characters[character]?.flags?.includes(flag) === true
   }

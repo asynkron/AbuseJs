@@ -28,6 +28,14 @@ export type {
   PlayerView,
 } from './types'
 
+/** The view box, grown, that decides which creatures are awake this tick. */
+export interface ActiveBox {
+  x1: number
+  y1: number
+  x2: number
+  y2: number
+}
+
 /** Every level object type this subsystem takes over. */
 export const ENEMY_TYPES: readonly string[] = [
   'ANT_ROOF',
@@ -79,10 +87,33 @@ export class EnemyGroup {
     this.members.push(enemy)
   }
 
-  /** One tick for everything, then the day's arrivals and departures. */
-  update(player: PlayerView): void {
+  /**
+   * One tick for everything in range, then the day's arrivals and departures.
+   *
+   * `active` is the view box grown by a quarter of its own size, which is what
+   * `add_actives` is handed (src/game.cpp:1954). A creature outside it, plus its
+   * own `(range x y)`, does not think at all - it is frozen exactly as it stands
+   * until the view comes back. That is how the original keeps a level's far side
+   * still, and running everything everywhere let creatures path, fall and die
+   * off-screen.
+   *
+   * One thing the original also does and this does not: `pull_actives` drags any
+   * object *linked* to an active one into the list, however far away it is. No
+   * creature in the shipped levels depends on being pulled that way, so it is
+   * left out rather than guessed at.
+   */
+  update(player: PlayerView, active: ActiveBox): void {
     for (let i = this.members.length - 1; i >= 0; i--) {
       const enemy = this.members[i]
+
+      const [rangeX, rangeY] = enemy.range
+      const inRange =
+        enemy.x + rangeX >= active.x1 &&
+        enemy.x - rangeX <= active.x2 &&
+        enemy.y + rangeY >= active.y1 &&
+        enemy.y - rangeY <= active.y2
+      if (!inRange) continue
+
       if (enemy.update(player)) continue
 
       this.members.splice(i, 1)
