@@ -41,6 +41,14 @@
         transition: opacity 400ms ease;
       }
       #title.hidden { opacity: 0; pointer-events: none; }
+      /*
+       * `#title` above is an id, so it outranks the browser's own
+       * `[hidden] { display: none }` and the attribute in the markup would
+       * otherwise do nothing at all. That is not cosmetic: the screen is
+       * `position: fixed` at `z-index: 20`, so whenever it is meant to be
+       * hidden but is not, it covers the running game and swallows every click.
+       */
+      #title[hidden] { display: none; }
       #title::after {
         content: '';
         position: absolute;

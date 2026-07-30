@@ -48,6 +48,14 @@ export function showTitleScreen(options: { canResume: boolean; skip: boolean }):
   let difficulty = storedDifficulty()
 
   if (options.skip || !root || !newGame || !loadGame) {
+    // Take it out of the document rather than just leaving it be. It is
+    // `position: fixed` at `z-index: 20`, and returning here means none of the
+    // buttons below ever get a click handler - so a screen left standing sits
+    // over the running game looking like a menu that ignores you. Not relying
+    // on the `hidden` attribute either: an id selector in the stylesheet
+    // outranks it, which is what made this reachable in the first place.
+    root?.remove()
+
     // Skipping means a deep link, which is an explicit request for *that*
     // level - resuming would quietly send you somewhere else instead. Only a
     // real press of Load Saved Game resumes.
