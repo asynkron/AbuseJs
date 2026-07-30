@@ -8,17 +8,24 @@
  */
 
 /**
- * One tick of ours is two thirds of one of the original's.
+ * One of our ticks is a quarter of one of the original's.
  *
- * Derived rather than guessed. The cop's own abilities are run_top_speed 9 and
- * jump_yvel -15 (lisp/people.lsp, def_char DARNEL); Player.ts runs him at
- * 6.0px per 60Hz tick. 6/9 is the factor that was chosen there, and every
- * monster velocity is quoted in the same units as that 9, so applying the same
- * factor keeps an ant's 7 in the right relation to the cop it is chasing.
+ * The original's engine steps its logic at 15Hz (`physics_update = 1000/15`,
+ * src/sdlport/setup.cpp:119) and every number in its tables is per one of those
+ * ticks. We step at 60Hz, so a quarter of each per-tick figure lands the same
+ * distance in the same wall-clock time: an ant's `run_top_speed 7` is 105 px/s
+ * either way, and a 20-tick delay is 1.33s either way. Motion comes out
+ * smoother than the original's, because it is integrated four times per
+ * original tick rather than once, but nothing moves or waits any faster.
  *
- * Durations go the other way: a wait of N original ticks is N * 3/2 of ours.
+ * This was 2/3, back-derived from the cop's hand-tuned 6.0px per 60Hz tick
+ * against his `run_top_speed 9`. That kept the monsters in proportion to *that
+ * cop*, but it made the whole game - creatures, bullets, delays, animation -
+ * run 2.67x the original's pace.
+ *
+ * Durations go the other way: a wait of N original ticks is 4N of ours.
  */
-export const TICK_SCALE = 2 / 3
+export const TICK_SCALE = 1 / 4
 
 /** An original velocity (pixels per original tick) in pixels per our tick. */
 export const speed = (original: number): number => original * TICK_SCALE
@@ -37,15 +44,18 @@ export const ticks = (original: number): number => Math.round(original / TICK_SC
  * Downward acceleration for anything with gravity on.
  *
  * The original turns gravity on with `(set_gravity 1)` and adds that 1 to yvel
- * each tick, which converts to 0.44 here. Player.ts falls the cop at 0.55,
- * hand-tuned for feel, and a monster that falls visibly slower than the player
- * standing next to it reads as broken - so the port shares the cop's figure
- * rather than the derived one.
+ * every tick, which is 225 px/s^2. Everything falls at this now, the cop
+ * included, so nothing falls visibly faster than the thing beside it.
  */
-export const GRAVITY = 0.55
+export const GRAVITY = accel(1)
 
-/** Terminal velocity, matching the cop's in Player.ts. */
-export const MAX_FALL = 12
+/**
+ * A cap on falling speed. The original has none - `tick` just keeps adding
+ * gravity - so this is only here to stop a long drop stepping further in one
+ * tick than the collision sweep can resolve. Set well above anything a shipped
+ * level can reach, so it never decides how the game plays.
+ */
+export const MAX_FALL = speed(48)
 
 /**
  * Difficulty-selected values, on `hard`.

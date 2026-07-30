@@ -1,3 +1,4 @@
+import { ticks } from '../../enemies/tuning'
 import { BASE_HEALTH_CAP } from '../healing'
 import { drawsTorso } from '../legStates'
 import { PLAIN_VISUALS, type Ghost, type PowerEffect, type PowerHost, type PowerInput, type PowerVisuals } from '../types'
@@ -19,7 +20,7 @@ import { PLAIN_VISUALS, type Ghost, type PowerEffect, type PowerHost, type Power
 
 /** Extra ticks knocked off `fire_delay1` per tick held - `do_special_power`. */
 /** `(mod (game_tick) 16)` - how often FAST chirps while it is held. */
-const SPEED_SOUND_EVERY = 16
+const SPEED_SOUND_EVERY = ticks(16)
 
 const COOLDOWN_BURN = 1
 

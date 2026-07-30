@@ -1,3 +1,4 @@
+import { ticks } from './enemies/tuning'
 import { Graphics } from 'pixi.js'
 
 import type { LevelObjectData } from '../assets/types'
@@ -41,8 +42,8 @@ const SEGMENT = 3
 const PUSH_CLEARANCE = 35
 /** `(<= bgy (+ end_y 20))` - how far past the floor end the band still acts. */
 const SPAN_SLACK = 20
-/** Ticks between FF_SND, from `(eq (mod (game_tick) 4) 0)`. */
-const SOUND_EVERY = 4
+/** Ticks between FF_SND, from `(eq (mod (game_tick) 4) 0)` - engine ticks. */
+const SOUND_EVERY = ticks(4)
 
 /** The four passes, outer to inner, as {from, to, width}. */
 const PASSES: readonly { from: number; to: number; width: number }[] = [

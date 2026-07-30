@@ -8,27 +8,43 @@ import { CLIMB_OFF_RANGE, CLIMB_OFF_RISE, CLIMB_SPEED } from './Ladders'
 import { BASE_HEALTH_CAP, drawsTorso, scaleDamage, type PowerVisuals } from './powers'
 import { atan2Deg, TORSO_FALLBACK, WEAPON_SLOTS, type WeaponSlot } from './weapons/index'
 import { isGrounded, moveAndCollide } from './collision'
+import { accel, GRAVITY, MAX_FALL, speed, ticks } from './enemies/tuning'
 
 /**
- * Our own platformer feel - not a reimplementation of Abuse's movement.
- * Units are world pixels per 60Hz tick.
+ * The cop's movement, from `def_char DARNEL`'s abilities (lisp/people.lsp:583-592)
+ * through the same conversions every creature uses.
+ *
+ * These were hand-tuned figures before - 6.0px a tick and a 0.55 gravity - and
+ * they were what TICK_SCALE was originally derived from, which is how the whole
+ * game ended up running at 2.67x the original's pace. Now the abilities are the
+ * source and the cop moves at the original's 135 px/s with a 112px jump.
+ *
+ * The three helpers below the abilities - the jump cutoff, coyote time and the
+ * jump buffer - are ours and have no counterpart in the original. They are kept
+ * because they only affect the *edges* of a jump the player asked for, not how
+ * far or fast he travels, and dropping them makes the cop feel broken on a
+ * keyboard. Their durations are in original ticks like everything else.
  */
 const PHYSICS = {
-  gravity: 0.55,
-  maxFall: 12,
-  walkSpeed: 3.2,
-  runSpeed: 6.0,
-  accel: 0.7,
-  airAccel: 0.35,
-  friction: 0.55,
-  airFriction: 0.06,
-  jumpVelocity: -8.6,
+  gravity: GRAVITY,
+  maxFall: MAX_FALL,
+  /** `walk_top_speed 3` and `run_top_speed 9`. */
+  walkSpeed: speed(3),
+  runSpeed: speed(9),
+  /** `start_accel 8` and `stop_accel 9` - accelerations, so scaled twice. */
+  accel: accel(8),
+  friction: accel(9),
+  /** Airborne control is not in the abilities; halved, as the port had it. */
+  airAccel: accel(8) / 2,
+  airFriction: accel(9) / 10,
+  /** `jump_yvel -15`, which against gravity 1 is a 112px apex. */
+  jumpVelocity: speed(-15),
   /** Releasing jump early cuts the rise short, for variable-height jumps. */
   jumpCutoff: 0.45,
   /** Ticks after leaving a ledge during which a jump still counts. */
-  coyoteTicks: 6,
+  coyoteTicks: ticks(2),
   /** Ticks a jump press is remembered while airborne. */
-  jumpBufferTicks: 6,
+  jumpBufferTicks: ticks(2),
 }
 
 /** How fast the run cycle plays, in frames per pixel travelled. */
@@ -108,13 +124,13 @@ function shortestArc(a: number, b: number): number {
 }
 
 /** A weapon swap costs a beat, so cycling is not a free rate-of-fire boost. */
-const WEAPON_SWITCH_DELAY = 8
+const WEAPON_SWITCH_DELAY = ticks(2)
 /** Ticks a surface that is an object, not a tile, keeps counting as ground. */
-const OBJECT_SUPPORT_TICKS = 4
+const OBJECT_SUPPORT_TICKS = ticks(1)
 /** Rounds the cop starts a level with. */
 const STARTING_AMMO = 50
 /** Ticks of invulnerability after being hit, so one turret cannot chain-kill. */
-const HURT_INVULNERABLE = 30
+const HURT_INVULNERABLE = ticks(8)
 /**
  * The cop stays down until the player asks to carry on.
  *
@@ -123,7 +139,7 @@ const HURT_INVULNERABLE = 30
  * at all, so the old 120-tick auto-respawn pulled you back into play whether
  * you were ready or not.
  */
-const DEATH_SETTLE_TICKS = 30
+const DEATH_SETTLE_TICKS = ticks(8)
 
 /** How a power renames the leg animations, when one is being held. */
 export interface LegStateFilter {
@@ -640,8 +656,8 @@ export class Player extends Entity {
    * reaches into the torso and decrements `fire_delay1` directly, which speeds
    * up every weapon rather than any one of them.
    */
-  coolWeapon(ticks: number): void {
-    this.fireCooldown = Math.max(0, this.fireCooldown - ticks)
+  coolWeapon(amount: number): void {
+    this.fireCooldown = Math.max(0, this.fireCooldown - amount)
   }
 
   /**
@@ -665,7 +681,10 @@ export class Player extends Entity {
 
     const weapon = this.weaponSlot
     const dry = this.magazines[this.weapon] <= 0
-    this.fireCooldown = Math.max(1, dry ? (weapon.dryFireDelay ?? weapon.fireDelay) : weapon.fireDelay)
+    // The table holds the original's own `fire_delay1` values (src/cop.cpp:268,
+    // :310, :337), which are per engine tick like everything else.
+    const delay = dry ? (weapon.dryFireDelay ?? weapon.fireDelay) : weapon.fireDelay
+    this.fireCooldown = Math.max(1, ticks(delay))
 
     if (dry) {
       if (weapon.dryFireDelay === null) return null

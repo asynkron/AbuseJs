@@ -1,3 +1,4 @@
+import { ticks } from './enemies/tuning'
 import { Container, Graphics } from 'pixi.js'
 
 import type { GameAssets } from '../assets/loader'
@@ -17,13 +18,17 @@ import { BitmapFont } from '../render/BitmapFont'
 const TRIGGER_RADIUS_X = 120
 const TRIGGER_RADIUS_Y = 90
 /** How long a message stays up once triggered, in ticks. */
-const LINGER_TICKS = 240
+const LINGER_TICKS = ticks(100)
 const PADDING = 4
 
 interface Marker {
   x: number
   y: number
   text: string
+  /** Its spell is running now. */
+  showing?: boolean
+  /** It has had its spell and is gone for good, as `train_ai` returning nil. */
+  spent?: boolean
 }
 
 export class TrainMessages {
@@ -66,14 +71,30 @@ export class TrainMessages {
 
   update(playerX: number, playerY: number): void {
     for (const marker of this.markers) {
+      // `train_ai` returns nil once its ~100 ticks are up, which takes the
+      // marker out of the level for good (lisp/general.lsp:66-86) - so a hint
+      // shows once and never again, however often you walk back past it.
+      if (marker.spent) continue
       if (Math.abs(marker.x - playerX) > TRIGGER_RADIUS_X) continue
       if (Math.abs(marker.y - playerY) > TRIGGER_RADIUS_Y) continue
       if (marker.text !== this.current) {
         this.current = marker.text
         this.draw(marker.text)
       }
-      this.timer = LINGER_TICKS
+      // Counted from the moment it triggers and not refreshed while you stand
+      // there: the original shows it for a fixed spell regardless of position.
+      if (!marker.showing) {
+        marker.showing = true
+        this.timer = LINGER_TICKS
+      }
       break
+    }
+
+    for (const marker of this.markers) {
+      if (marker.showing && this.timer <= 1) {
+        marker.showing = false
+        marker.spent = true
+      }
     }
 
     if (this.timer > 0) {
