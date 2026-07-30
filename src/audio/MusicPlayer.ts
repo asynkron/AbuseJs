@@ -1,4 +1,5 @@
 import type { AudioBank } from './AudioBank'
+import { buildMusicChain, type MusicChain } from './reverb'
 import { SoundFont, type Voice } from './SoundFont'
 
 /**
@@ -25,6 +26,9 @@ interface MidiEvent {
 /** How far ahead events are queued, and how often the queue is topped up. */
 const LOOKAHEAD_SECONDS = 0.3
 const SCHEDULE_INTERVAL_MS = 100
+/** GM's default pitch-bend range: two semitones either side of centre. */
+const BEND_SEMITONES = 2
+
 /** MIDI's percussion channel. */
 const DRUM_CHANNEL = 9
 
@@ -133,6 +137,13 @@ function parseMidi(buf: ArrayBuffer): { events: MidiEvent[]; secondsPerTick: num
 
 export class MusicPlayer {
   private bus: GainNode | null = null
+  /** Reverb and chorus, between the voices and the bus. See reverb.ts. */
+  private chain: MusicChain | null = null
+  /**
+   * Pitch bend per channel, in semitones. `0xE0` is 14 bits centred on 0x2000
+   * and the range is the GM default of two semitones either way.
+   */
+  private readonly bends = new Float32Array(16)
   private noise: AudioBuffer | null = null
 
   private events: MidiEvent[] = []
@@ -192,7 +203,11 @@ export class MusicPlayer {
     this.programs.fill(0)
     this.currentTrack = path
 
-    this.bus = this.audio.createBus(0.35)
+    const bus = this.audio.createBus(0.35)
+    if (!bus) return
+    this.bus = bus
+    this.chain = buildMusicChain(context, bus)
+    this.bends.fill(0)
     if (!this.noise) this.noise = this.makeNoiseBuffer(context)
     // Real patches if they load; the oscillator synth covers the gap if not.
     await this.soundfont.load(this.base)
@@ -223,6 +238,8 @@ export class MusicPlayer {
       }
     }
     this.sampled.clear()
+    this.chain?.dispose()
+    this.chain = null
     this.bus?.disconnect()
     this.bus = null
     this.currentTrack = null
@@ -268,6 +285,15 @@ export class MusicPlayer {
       return
     }
 
+    // `0xE0` - 14 bits, little end first, centred on 0x2000. Ignoring it left
+    // every bent line sitting flat on the note it was bent away from.
+    if (high === 0xe0) {
+      const raw = event.data1 | (event.data2 << 7)
+      this.bends[channel] = ((raw - 0x2000) / 0x2000) * BEND_SEMITONES
+      this.applyBend(channel, time)
+      return
+    }
+
     const key = channel * 128 + event.data1
 
     if (high === 0x80 || (high === 0x90 && event.data2 === 0)) {
@@ -281,10 +307,10 @@ export class MusicPlayer {
 
     if (this.soundfont.loaded) {
       const context = this.audio.context_
-      if (context && this.bus) {
+      if (context && this.chain) {
         const voice = this.soundfont.noteOn(
           context,
-          this.bus,
+          this.chain.input,
           channel === DRUM_CHANNEL ? 128 : 0,
           this.programs[channel],
           event.data1,
@@ -292,6 +318,9 @@ export class MusicPlayer {
           time,
         )
         if (voice) {
+          if (this.bends[channel] !== 0) {
+            voice.source.detune.setValueAtTime(this.bends[channel] * 100, time)
+          }
           this.sampled.set(key, voice)
           return
         }
@@ -302,13 +331,32 @@ export class MusicPlayer {
     if (voice) this.voices.set(key, voice)
   }
 
+/**
+   * Sweeps every voice already sounding on a channel to its new bend.
+   *
+   * `detune` is in cents and rides on top of whatever rate the sample is
+   * already playing at, so this works for the sampled voices and the
+   * oscillator fallback alike.
+   */
+  private applyBend(channel: number, time: number): void {
+    const cents = this.bends[channel] * 100
+    for (const [key, voice] of this.sampled) {
+      if (Math.floor(key / 128) !== channel) continue
+      voice.source.detune.setValueAtTime(cents, time)
+    }
+    for (const [key, voice] of this.voices) {
+      if (Math.floor(key / 128) !== channel) continue
+      voice.osc.detune.setValueAtTime(cents, time)
+    }
+  }
+
   private startNote(
     time: number,
     event: MidiEvent,
     channel: number,
   ): { osc: OscillatorNode; gain: GainNode } | null {
     const context = this.audio.context_
-    if (!context || !this.bus) return null
+    if (!context || !this.chain) return null
 
     const osc = context.createOscillator()
     osc.type = waveformFor(this.programs[channel])
@@ -320,7 +368,7 @@ export class MusicPlayer {
     gain.gain.linearRampToValueAtTime(peak, time + 0.008)
     gain.gain.linearRampToValueAtTime(peak * 0.7, time + 0.08)
 
-    osc.connect(gain).connect(this.bus)
+    osc.connect(gain).connect(this.chain!.input)
     osc.start(time)
     // Safety stop: a note whose note-off is lost should not sound forever.
     osc.stop(time + 8)
@@ -329,7 +377,7 @@ export class MusicPlayer {
 
   private startDrum(time: number, event: MidiEvent): null {
     const context = this.audio.context_
-    if (!context || !this.bus || !this.noise) return null
+    if (!context || !this.chain || !this.noise) return null
 
     const source = context.createBufferSource()
     source.buffer = this.noise
@@ -341,7 +389,7 @@ export class MusicPlayer {
     gain.gain.setValueAtTime(peak, time)
     gain.gain.exponentialRampToValueAtTime(0.0001, time + 0.16)
 
-    source.connect(gain).connect(this.bus)
+    source.connect(gain).connect(this.chain!.input)
     source.start(time)
     source.stop(time + 0.2)
     return null

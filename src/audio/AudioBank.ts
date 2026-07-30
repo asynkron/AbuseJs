@@ -31,6 +31,26 @@ export interface PlayOptions {
 /** Beyond this many world pixels a positional sound is inaudible. */
 const EARSHOT = 640
 
+/**
+ * Random pitch spread per one-shot, in cents either way.
+ *
+ * The clips are the original's own and there is one of each, so a machine gun
+ * is the same 40ms of noise forty times a second and the ear hears a buzz
+ * rather than forty shots. Fifty-odd cents is under a semitone - enough to
+ * break the pattern, not enough to sound out of tune with itself.
+ *
+ * Loops are excluded: a looping sample re-pitched on restart wanders.
+ */
+const PITCH_SPREAD_CENTS = 55
+
+/**
+ * Air absorbs treble, so distance is not only quieter but duller. Sweeping a
+ * one-pole lowpass between these does more for the sense of space than the
+ * linear gain falloff on its own, and costs one biquad per voice.
+ */
+const FILTER_NEAR_HZ = 18000
+const FILTER_FAR_HZ = 900
+
 export class AudioBank {
   private context: AudioContext | null = null
   private master: GainNode | null = null
@@ -155,13 +175,16 @@ export class AudioBank {
 
     let gain = options.volume ?? 1
     let pan = 0
+    /** 0 at the listener, 1 at the edge of earshot. */
+    let reach = 0
 
     if (options.x !== undefined && options.y !== undefined) {
       const dx = options.x - this.listenerX
       const dy = options.y - this.listenerY
       const distance = Math.hypot(dx, dy)
       if (distance >= EARSHOT) return
-      gain *= 1 - distance / EARSHOT
+      reach = distance / EARSHOT
+      gain *= 1 - reach
       pan = Math.max(-1, Math.min(1, dx / (EARSHOT * 0.5)))
     }
 
@@ -174,15 +197,30 @@ export class AudioBank {
       source.buffer = buffer
       source.loop = options.loop ?? false
 
+      // Same clip, slightly different note each time.
+      if (!source.loop) {
+        source.detune.value = (Math.random() * 2 - 1) * PITCH_SPREAD_CENTS
+      }
+
       const gainNode = this.context.createGain()
       gainNode.gain.value = gain
+
+      let head: AudioNode = source
+      if (reach > 0) {
+        const filter = this.context.createBiquadFilter()
+        filter.type = 'lowpass'
+        // Geometric, not linear: pitch and brightness are heard as ratios.
+        filter.frequency.value = FILTER_NEAR_HZ * Math.pow(FILTER_FAR_HZ / FILTER_NEAR_HZ, reach)
+        source.connect(filter)
+        head = filter
+      }
 
       if (typeof this.context.createStereoPanner === 'function') {
         const panner = this.context.createStereoPanner()
         panner.pan.value = pan
-        source.connect(gainNode).connect(panner).connect(this.master)
+        head.connect(gainNode).connect(panner).connect(this.master)
       } else {
-        source.connect(gainNode).connect(this.master)
+        head.connect(gainNode).connect(this.master)
       }
 
       source.start()
