@@ -12,7 +12,7 @@ import {
   type MoveAbilities,
 } from './motion'
 import { canSee, eyeY, seeDist } from './raycast'
-import { DIFFICULTY, GRAVITY, accel, oneIn, random, speed, ticks } from './tuning'
+import { DIFFICULTY, GRAVITY, accel, oneIn, oneInPerTick, random, speed, ticks } from './tuning'
 import type { EnemyOverrides, PlayerView } from './types'
 import { aimAngle, ammoFor, shotFrom } from './weapons'
 
@@ -108,12 +108,6 @@ const ANT = {
   contactDamage: 4,
 } as const
 
-/**
- * Whether a wounded ant ever recovers. See the flinch branch in `think`: the
- * original's never does.
- */
-const STUN_IS_PERMANENT = true
-
 /** ant_ct: health per variant, applied when the level saved none. */
 const HP_BY_AITYPE = [15, 50, 25, 35, 35, 20]
 
@@ -162,7 +156,7 @@ const PHASE_BY_AISTATE: Record<number, AntPhase> = {
   16: 'hiding',
 }
 
-/** The animation each phase rests in, for putting one back after a flinch. */
+/** The animation each phase rests in, for placing an ant the level saved mid-phase. */
 const PHASE_STATE: Record<AntPhase, string> = {
   hanging: 'hanging',
   hiding: 'hiding',
@@ -226,23 +220,20 @@ export class Ant extends Enemy {
     this.pushChar(player, ANT.pushX, ANT.pushY)
 
     if (this.flinching) {
-      const playing = this.nextPicture()
-      // And that is the whole of it: there is no way out of this branch.
+      // `if (o->state==flinch_up || o->state==flinch_down) { o->next_picture();
+      // return true_symbol; }` (src/ant.cpp:143-147). Read on its own this
+      // branch looks like a dead end, and the ant would be neutralised by one
+      // non-lethal shot for the rest of the level.
       //
-      // Both copies of ant_ai dead-end here - the lisp spec at ant.lsp:184 and
-      // the compiled `src/ant.cpp:144-148`, which discards next_picture's
-      // return and just re-enters every tick - and `ant_damage` sets one of the
-      // two flinch states on *every* non-lethal hit (ant.lsp:407-409). So in
-      // the shipped game a single non-lethal shot neutralises an ant for good:
-      // it stands in its wince pose, out of the fight, until something finishes
-      // it. That reads like a bug in the original rather than a design, but it
-      // is what the original does, so it is what this does.
-      //
-      // Flip STUN_IS_PERMANENT to false to get the two-frame stun the port used
-      // to have, which is much harder and much less faithful.
-      if (!STUN_IS_PERMANENT && !playing) {
+      // It is not, because `next_picture` calls `next_sequence` when the
+      // sequence runs out, and that has a case for exactly these two states:
+      // `end_run_jump` if the creature has one, otherwise `stopped`
+      // (src/objects.cpp:311-325). No ant has `end_run_jump`, so the wince ends
+      // in `stopped`, the state test above stops matching, and the switch below
+      // picks up from the aistate the ant was already on.
+      if (!this.nextPicture()) {
         this.flinching = false
-        this.trySetState(PHASE_STATE[this.phase], true)
+        this.setState('stopped')
       }
       return true
     }
@@ -374,7 +365,7 @@ export class Ant extends Enemy {
 
   private run(player: PlayerView): void {
     this.screamCheck(player)
-    if (oneIn(20)) this.needToDodge = true
+    if (oneInPerTick(20)) this.needToDodge = true
     if (this.dodge()) return
 
     if (!this.facingPlayer(player)) {
@@ -388,13 +379,13 @@ export class Ant extends Enemy {
 
     const distX = this.distX(player)
 
-    if (oneIn(5) && distX < ANT.fireDistX && this.distY(player) < ANT.fireDistY && this.canHitPlayer(player)) {
+    if (oneInPerTick(5) && distX < ANT.fireDistX && this.distY(player) < ANT.fireDistY && this.canHitPlayer(player)) {
       this.setState('weapon_fire')
       this.setPhase('groundFire')
       return
     }
 
-    if (distX < ANT.pounceFar && distX > ANT.pounceNear && oneIn(5)) {
+    if (distX < ANT.pounceFar && distX > ANT.pounceNear && oneInPerTick(5)) {
       this.setPhase('pounceWait')
       return
     }
@@ -404,9 +395,18 @@ export class Ant extends Enemy {
       return
     }
 
+    // `if (o->state!=running) o->set_state(running)` (src/ant.cpp:284). Walking
+    // is the only ground branch that changes the art, and it has to happen
+    // before the congestion return: `stopped` is a single frame, so an ant left
+    // in it slides along with its legs frozen. The guard matters as much as the
+    // call - a bare set_state would restart the cycle every tick.
+    if (this.state !== 'running') this.setState('running')
+
     // Plain walking. An ant with another one just ahead of it does not move at
     // all - it does not turn either - so a column of ants queues rather than
-    // piling into one another.
+    // piling into one another. The original gets this from `try_move`'s object
+    // pass instead, which leaves the legs churning in place; hence the state
+    // above is set first.
     if (!this.roomToAdvance()) return
 
     const airborne = !isGrounded(this.world.level, this)
@@ -506,7 +506,7 @@ export class Ant extends Enemy {
   private ceilingWalk(player: PlayerView): void {
     this.screamCheck(player)
 
-    const overhead = this.y < player.y && this.distX(player) < ANT.ceilDropDistX && oneIn(8)
+    const overhead = this.y < player.y && this.distX(player) < ANT.ceilDropDistX && oneInPerTick(8)
     if (overhead || this.needToDodge) {
       this.setState('run_jump')
       this.goPhase('leaping')
@@ -515,7 +515,7 @@ export class Ant extends Enemy {
 
     if (!this.facingPlayer(player)) this.direction = -this.direction as 1 | -1
 
-    if (this.distX(player) < ANT.ceilFireDistX && oneIn(5)) {
+    if (this.distX(player) < ANT.ceilFireDistX && oneInPerTick(5)) {
       this.setState('ceil_fire')
       this.goPhase('ceilingFire')
       return

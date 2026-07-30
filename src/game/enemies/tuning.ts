@@ -106,6 +106,22 @@ export const DIFFICULTY = {
 /** `(eq (random n) 0)` - the shape most of the AI's coin flips take. */
 export const oneIn = (n: number): boolean => Math.floor(Math.random() * n) === 0
 
+/**
+ * A coin flip the original rolls once per engine tick.
+ *
+ * The engine thinks at 15Hz and we think at 60Hz, so rolling 1-in-n on each of
+ * our ticks comes up four times as often as it should: an ant that shoots,
+ * dodges and pounces four times as much as the shipped one, and one that
+ * therefore spends most of its life in a fire pose rather than walking.
+ * Stretching the denominator by the same factor as every other rate keeps the
+ * expected number of hits per second the same.
+ *
+ * Only for rolls that happen *every* tick. A roll made once, on some event -
+ * an ammo drop when an ant dies - is already at the original's rate, and so is
+ * anything inside a `TICK_SCALE` accumulator, like the hazards.
+ */
+export const oneInPerTick = (n: number): boolean => oneIn(ticks(n))
+
 /** `(random n)` - a whole number in [0, n). */
 export const random = (n: number): number => Math.floor(Math.random() * n)
 

@@ -158,6 +158,21 @@ export class LevelLogic implements LogicWorld {
     return this.signals.isActivated(index)
   }
 
+  /** The engine's own `(activated)`, outgoing links only. Gates damage. */
+  isSelfActivated(index: number): boolean {
+    return this.signals.isSelfActivated(index)
+  }
+
+  /** The links this object owns, after any deaths have pruned them. */
+  linksOf(index: number): readonly number[] {
+    return this.signals.linksOf(index)
+  }
+
+  /** `level::remove_object` - unwire an object the world has just taken out. */
+  removeReferences(index: number): void {
+    this.signals.removeReferences(index)
+  }
+
   /** Every object this subsystem drives, in level order. */
   get views(): readonly LogicView[] {
     return this.viewList

@@ -63,12 +63,21 @@ const IDLE_FPS = 8
 /**
  * The cop is drawn as two halves: legs from art/cop.spe and a torso from
  * art/coptop.spe that rotates independently through 24 aim frames. The engine
- * pins the torso at `bottom.y + 29 - bottomHeight`, nudged 4px when facing
- * left (src/cop.cpp, top_draw).
+ * pins the torso at `bottom.y + 29 - bottomHeight` and always draws it
+ * unmirrored (src/cop.cpp, top_draw).
  */
 const TOP_CHARACTER = 'MGUN_TOP'
 const TOP_BASELINE = 29
-const TOP_FLIP_NUDGE = 4
+
+/**
+ * `if (q->direction<0) q->x+=4;` (src/cop.cpp:155). The shoulder the gun hangs
+ * off is 4px further along when the cop faces left.
+ *
+ * It applies to the aim maths only. The original puts the shift back before
+ * `o->x=q->x`, so the torso is drawn at the legs' own x either way - shifting
+ * the sprite too made it jump sideways on every turn.
+ */
+const TOP_AIM_NUDGE = 4
 
 /**
  * The scale `SET_FADE_COUNT` works on - `(draw_transparent count 16)`, where
@@ -296,8 +305,10 @@ export class Player extends Entity {
   /** Points the torso at a world-space position. */
   aimAt(worldX: number, worldY: number): void {
     // `lisp_atan2(q->y - iy - pointer_y, pointer_x - q->x - ix)` - the heading
-    // from the arm's pivot to the crosshair (src/cop.cpp:165).
-    const wanted = atan2Deg(this.y - AIM_PIVOT_Y - worldY, worldX - this.x - AIM_PIVOT_X)
+    // from the arm's pivot to the crosshair (src/cop.cpp:165), measured from the
+    // shoulder, which sits 4px along when he faces left.
+    const originX = this.x + (this.direction < 0 ? TOP_AIM_NUDGE : 0)
+    const wanted = atan2Deg(this.y - AIM_PIVOT_Y - worldY, worldX - originX - AIM_PIVOT_X)
 
     // Pick the frame whose own heading is closest to that.
     let best = 0
@@ -313,10 +324,13 @@ export class Player extends Entity {
 
     const [offX, offY] = MUZZLE_OFFSETS[best]
     const muzzleY = this.y - offY
-    const muzzleX = this.x + offX
+    const muzzleX = originX + offX
 
     // Close in, the shot follows the arm; otherwise it follows the crosshair.
-    if (Math.abs(muzzleY - worldY) < AIM_SNAP_Y && Math.abs(worldX - muzzleX) < AIM_SNAP_X) {
+    // The horizontal test is `abs(pointer_x - q->x + fb[0])`, which adds the
+    // offset where the muzzle subtracts it - the original's own sign slip, kept
+    // because it decides where the snap zone sits.
+    if (Math.abs(muzzleY - worldY) < AIM_SNAP_Y && Math.abs(worldX - originX + offX) < AIM_SNAP_X) {
       this.aimAngle = AIM_FRAME_ANGLES[best]
     } else {
       this.aimAngle = atan2Deg(muzzleY - worldY, worldX - muzzleX)
@@ -705,16 +719,17 @@ export class Player extends Entity {
     this.topSprite.visible = !this.isDead && drawsTorso(this.state)
     this.topSprite.texture = frame.texture
 
-    const x = this.prevX + (this.x - this.prevX) * alpha + (this.direction < 0 ? TOP_FLIP_NUDGE : 0)
+    const x = this.prevX + (this.x - this.prevX) * alpha
     const y = this.prevY + (this.y - this.prevY) * alpha + TOP_BASELINE - bottom.height
 
-    if (this.direction >= 0) {
-      this.topSprite.scale.x = 1
-      this.topSprite.x = Math.round(x - frame.xcfg)
-    } else {
-      this.topSprite.scale.x = -1
-      this.topSprite.x = Math.round(x - (frame.width - frame.xcfg - 1) + frame.width)
-    }
+    // `o->direction=1;  // always face right` (src/cop.cpp:153). The torso is
+    // never mirrored: its 24 frames already sweep the whole circle, so the aim
+    // frame alone says which way the gun points. Mirroring it as well negated
+    // that - and because the flip followed the legs rather than the crosshair,
+    // aiming left read correctly until the cop turned to walk left, then
+    // inverted.
+    this.topSprite.scale.x = 1
+    this.topSprite.x = Math.round(x - frame.xcfg)
     this.topSprite.y = Math.round(y - frame.height + 1)
   }
 
@@ -737,16 +752,15 @@ export class Player extends Entity {
     return this.topFrames[this.topFrameIndex]
   }
 
-  /**
-   * The point shots leave from: the end of the gun for the current aim frame,
-   * mirrored when facing left.
-   */
+  /** The point shots leave from: the end of the gun for the current aim frame. */
   get muzzle(): { x: number; y: number } {
     // Taken as it stands: the chosen frame already points the way the cop is
     // aiming, so there is no mirroring to undo. Mirroring it was the other half
-    // of the old evenly-divided frame lookup.
+    // of the old evenly-divided frame lookup. The shoulder shift applies here
+    // too, since this is the same `q->x + fb[0]` the angle was measured from.
     const offset = MUZZLE_OFFSETS[this.topFrameIndex] ?? MUZZLE_OFFSETS[0]
-    return { x: this.x + offset[0], y: this.y - offset[1] }
+    const originX = this.x + (this.direction < 0 ? TOP_AIM_NUDGE : 0)
+    return { x: originX + offset[0], y: this.y - offset[1] }
   }
 
   /**

@@ -60,6 +60,14 @@ export interface MoveAbilities {
 export interface Mover extends Body {
   vx: number
   vy: number
+  /**
+   * `gravity()` - the engine's jump latch, not an acceleration.
+   *
+   * Set the moment a jump launches and cleared by the landing, and the jump
+   * input is refused while it is set (src/objects.cpp:1344 and :1001). Only the
+   * creatures that jump ever carry it, hence optional.
+   */
+  jumpLatch?: boolean
 }
 
 /**
@@ -83,10 +91,27 @@ export function moveCharacter(
   if (body.vx < target) body.vx = Math.min(target, body.vx + rate)
   else if (body.vx > target) body.vx = Math.max(target, body.vx - rate)
 
-  if (jump && isGrounded(level, body)) body.vy = abilities.jumpYvel
+  // `if (cy<0 && !floating() && !gravity())` (src/objects.cpp:1344): the jump is
+  // latched, so it fires on the tick the feet leave the ground and is refused
+  // until the landing clears the flag.
+  //
+  // The latch is what makes a leap end. Without it a creature that holds the
+  // jump input relaunches on the very tick it touches down, `integrate` then
+  // moves it upward, and so `blocked.down` is never once reported - which is an
+  // ant that leaps and then glides on past the player indefinitely, because the
+  // landing is the only thing that returns it to the chase.
+  if (jump && !body.jumpLatch && isGrounded(level, body)) {
+    body.vy = abilities.jumpYvel
+    body.jumpLatch = true
+  }
   if (gravity) body.vy = Math.min(body.vy + GRAVITY, MAX_FALL)
 
-  return integrate(level, body)
+  const blocked = integrate(level, body)
+
+  // `set_gravity(0)` once it has hit the ground again (src/objects.cpp:1001).
+  if (blocked.down) body.jumpLatch = false
+
+  return blocked
 }
 
 /** Moves a body by its own velocity and reports which sides stopped it. */

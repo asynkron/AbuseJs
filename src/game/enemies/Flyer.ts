@@ -3,7 +3,7 @@ import type { LevelObjectData } from '../../assets/types'
 import { Enemy, type Battlefield } from './Enemy'
 import { bounceMove } from './motion'
 import { canSee, eyeY } from './raycast'
-import { accel, oneIn, speed, ticks } from './tuning'
+import { accel, oneInPerTick, speed, ticks } from './tuning'
 import type { EnemyOverrides, PlayerView } from './types'
 import { aimAngle, shotFrom } from './weapons'
 
@@ -178,11 +178,11 @@ export class Flyer extends Enemy {
    * biased upwards and to the right, exactly as the script has it.
    */
   private wobble(): void {
-    if (oneIn(5)) this.vx += FLYER.drift
-    else if (oneIn(5)) this.vx -= FLYER.drift
+    if (oneInPerTick(5)) this.vx += FLYER.drift
+    else if (oneInPerTick(5)) this.vx -= FLYER.drift
 
-    if (oneIn(5)) this.vy += FLYER.drift
-    else if (oneIn(5)) this.vy -= FLYER.drift
+    if (oneInPerTick(5)) this.vy += FLYER.drift
+    else if (oneInPerTick(5)) this.vy -= FLYER.drift
   }
 
   /**

@@ -74,6 +74,52 @@ export class SignalNetwork {
   }
 
   /**
+   * `(activated)` exactly as the engine implements it (src/clisp.cpp:855-862):
+   * true when the object owns no links at all, otherwise link 0's aistate.
+   * Inbound links are not consulted - the primitive only ever looks at
+   * `get_object(0)`.
+   *
+   * This is deliberately narrower than `isActivated` below. Anything that
+   * decides whether an object may be *hurt* has to use this one, because the
+   * inbound guess turns a wall some sensor happens to point at into a wall that
+   * cannot be shot, and a floor of those stops collapsing halfway down.
+   */
+  isSelfActivated(index: number): boolean {
+    const own = this.outgoing[index] ?? []
+    if (own.length === 0) return true
+    return this.isOn(own[0])
+  }
+
+  /**
+   * `level::remove_object` (src/level.cpp:2526-2540): a dead object is cut out
+   * of every other object's link list.
+   *
+   * This is not bookkeeping - it is the mechanism. A hidden wall wired to one
+   * other object is shielded while that object lives, so blowing the keystone
+   * is what makes the walls around it shootable at all; without the cleanup
+   * they stay immune forever and the level cannot be opened up.
+   */
+  removeReferences(index: number): void {
+    for (const owner of this.incoming[index] ?? []) {
+      const targets = this.outgoing[owner]
+      if (!targets) continue
+      for (let at = targets.length - 1; at >= 0; at--) {
+        if (targets[at] === index) targets.splice(at, 1)
+      }
+    }
+    if (this.incoming[index]) this.incoming[index] = []
+
+    // The engine also drops the dying object's own links, so nothing keeps a
+    // stale reference in either direction.
+    for (const target of this.outgoing[index] ?? []) {
+      const sources = this.incoming[target]
+      const at = sources?.indexOf(index) ?? -1
+      if (sources && at >= 0) sources.splice(at, 1)
+    }
+    if (this.outgoing[index]) this.outgoing[index] = []
+  }
+
+  /**
    * The engine's `(activated)`, written out longhand all over the lisp as
    * `(or (eq (total_objects) 0) (not (eq (with_object (get_object 0) (aistate)) 0)))`
    * - true when the object has no links at all, otherwise true when its driver

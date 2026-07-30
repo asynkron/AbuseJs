@@ -766,7 +766,22 @@ export class World {
     this.propsByIndex.delete(prop.objectIndex)
     const blocker = this.blockers.indexOf(prop)
     if (blocker >= 0) this.blockers.splice(blocker, 1)
+    this.unwire(prop)
     this.removeActor(prop)
+  }
+
+  /**
+   * `level::remove_object`'s link pass (src/level.cpp:2526-2540): whatever
+   * pointed at this object no longer does.
+   *
+   * Load-bearing for the hidden walls. A wall wired to one other object refuses
+   * damage until that object's aistate goes non-zero, so a course of walls
+   * hanging off a keystone can only be opened by the keystone dying and taking
+   * the links with it. Skipping this left every such wall permanently immune,
+   * which is a floor that loses its top layer and nothing more.
+   */
+  private unwire(prop: Prop): void {
+    if (prop.objectIndex >= 0) this.logic.removeReferences(prop.objectIndex)
   }
 
   private removeActor(prop: Prop): void {
@@ -1161,7 +1176,11 @@ export class World {
   private isShielded(prop: Prop): boolean {
     if (!this.assets.hasFlag(prop.character, 'unactive_shield')) return false
     if (prop.objectIndex < 0) return false
-    return !this.logic.isActivated(prop.objectIndex)
+    // `isSelfActivated`, not `isActivated`: the primitive reads link 0 and
+    // nothing else. Consulting inbound links here shielded 106 walls that a
+    // sensor merely points at, which is a floor whose lower courses cannot be
+    // shot out from under it.
+    return !this.logic.isSelfActivated(prop.objectIndex)
   }
 
   /**
@@ -1184,7 +1203,10 @@ export class World {
       if (prop.objectIndex < 0) continue
 
       // `(and (eq (total_objects) 1) (with_object (get_object 0) (not (eq (aistate) 0))))`
-      const links = this.level.links[prop.objectIndex] ?? []
+      // Read the live list, not the level file's: a wall whose one link has
+      // since died is unwired now, so it neither self-destructs nor stays
+      // shielded - it just becomes an ordinary shootable block.
+      const links = this.logic.linksOf(prop.objectIndex)
       if (links.length !== 1) continue
       if (!this.logic.isOn(links[0])) continue
 
@@ -1363,6 +1385,7 @@ export class World {
 
       this.props.splice(i, 1)
       this.propsByIndex.delete(prop.objectIndex)
+      this.unwire(prop)
       this.removeActor(prop)
     }
 
