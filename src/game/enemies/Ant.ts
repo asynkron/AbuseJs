@@ -108,6 +108,12 @@ const ANT = {
   contactDamage: 4,
 } as const
 
+/**
+ * Whether a wounded ant ever recovers. See the flinch branch in `think`: the
+ * original's never does.
+ */
+const STUN_IS_PERMANENT = true
+
 /** ant_ct: health per variant, applied when the level saved none. */
 const HP_BY_AITYPE = [15, 50, 25, 35, 35, 20]
 
@@ -220,12 +226,21 @@ export class Ant extends Enemy {
     this.pushChar(player, ANT.pushX, ANT.pushY)
 
     if (this.flinching) {
-      // The Lisp copy of ant_ai has no way out of this branch - it checks the
-      // state, plays a frame and returns, and nothing ever changes the state
-      // back, so a shot ant would freeze forever. The compiled version it
-      // stands in for plainly did not, and the flinch is two frames long, so
-      // that is how long the stun lasts here.
-      if (!this.nextPicture()) {
+      const playing = this.nextPicture()
+      // And that is the whole of it: there is no way out of this branch.
+      //
+      // Both copies of ant_ai dead-end here - the lisp spec at ant.lsp:184 and
+      // the compiled `src/ant.cpp:144-148`, which discards next_picture's
+      // return and just re-enters every tick - and `ant_damage` sets one of the
+      // two flinch states on *every* non-lethal hit (ant.lsp:407-409). So in
+      // the shipped game a single non-lethal shot neutralises an ant for good:
+      // it stands in its wince pose, out of the fight, until something finishes
+      // it. That reads like a bug in the original rather than a design, but it
+      // is what the original does, so it is what this does.
+      //
+      // Flip STUN_IS_PERMANENT to false to get the two-frame stun the port used
+      // to have, which is much harder and much less faithful.
+      if (!STUN_IS_PERMANENT && !playing) {
         this.flinching = false
         this.trySetState(PHASE_STATE[this.phase], true)
       }

@@ -24,7 +24,14 @@ const BOSS = {
   leadTicksX: ticks(8),
   leadTicksY: ticks(2),
 
-  /** boss_cons seeds the first taunt; later ones are 30 - aitype * 2. */
+  /**
+   * The first taunt's length, for a boss whose level saved none.
+   *
+   * `boss_cons` sets `taunt_time` to 20, but def_char BOSS_ANT never lists it
+   * as the constructor (ant.lsp:734-736), so it never runs - which does not
+   * matter, because every boss in the game saves its own `taunt_time` lvar
+   * (17, 4, 22 and 25). Later taunts are 30 - aitype * 2 as usual.
+   */
   firstTaunt: ticks(20),
   tauntPeriod: ticks(25),
 
@@ -60,7 +67,7 @@ export class BossAnt extends Enemy {
   private phase: BossPhase
   private replay = false
 
-  private tauntTime = BOSS.firstTaunt
+  private tauntTime: number
   /** 0 is solid and vulnerable; anything else is mid-fade and untouchable. */
   private fade = 0
 
@@ -75,6 +82,8 @@ export class BossAnt extends Enemy {
     this.height = 28
 
     this.form = data.aitype
+    const savedTaunt = data.lvars?.taunt_time
+    this.tauntTime = savedTaunt ? ticks(savedTaunt) : BOSS.firstTaunt
     this.phase = data.aistate === 0 ? 'dormant' : 'taunting'
     this.setState('hiding', true)
   }
