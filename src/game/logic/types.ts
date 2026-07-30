@@ -38,7 +38,13 @@ export interface LogicObjectData {
 }
 
 /** The sounds this subsystem plays, by their name in lisp/sfx.lsp. */
-export type LogicSound = 'SWISH' | 'SWITCH_SND' | 'PLAT_A_SND' | 'PLAT_D_SND' | 'SPRING_SOUND'
+export type LogicSound =
+  | 'SWISH'
+  | 'SWITCH_SND'
+  | 'PLAT_A_SND'
+  | 'PLAT_D_SND'
+  | 'SPRING_SOUND'
+  | 'FADEON_SND'
 
 /**
  * A player, as the logic sees one.

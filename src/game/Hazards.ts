@@ -35,6 +35,8 @@ export interface HazardHost {
   hurtPlayer(amount: number): void
   /** The lava flare's blast - `hurt_radius (x) (y) 20 20 nil 10`. */
   lavaBurst(x: number, y: number): void
+  /** A bare `hurt_radius` with its own `max_push`, for LAVA2's pulse. */
+  hurtRadiusPushed(x: number, y: number, radius: number, amount: number, push: number): void
   playSound(name: string, volume: number, x: number, y: number): void
   /** Takes the prop out of the world for good (an exploded mine or bomb). */
   remove(prop: Prop): void
@@ -63,6 +65,23 @@ const AIR_MINE_BLAST = { radius: 40, amount: 25 } as const
 
 /** `lava_ai`: 6 damage every 20 ticks of contact, and a 1-in-100 flare. */
 const LAVA = { damage: 6, damagePeriod: 20, flareChance: 100, flareTick: 5 } as const
+
+/**
+ * `lava2_ai` from the leon addon (data/addon/leon/lisp/lmisc.lsp:1-27) - a
+ * different hazard wearing the same art. No contact damage at all: it pulses on
+ * a timer, `hurt_radius (+ (x) 15) (y) 30 dam nil 4` every `dam_spd` ticks, and
+ * gurgles at volume 24 with 1-in-75 odds rather than 64 with 1-in-100.
+ */
+const LAVA2 = {
+  soundChance: 75,
+  soundVolume: 24,
+  /** `lava2_cons`, overridable through the `wrob_bdelay`/`wrob_btotal` lvars. */
+  period: 5,
+  damage: 10,
+  radius: 30,
+  offsetX: 15,
+  push: 4,
+} as const
 
 abstract class Hazard {
   /** Fraction of an original tick accumulated - see the module note. */
@@ -287,6 +306,47 @@ class Lightning extends Hazard {
   }
 }
 
+/**
+ * LAVA2 - `lava2_ai`. Two aistates that each wait `dam_spd` ticks, and the
+ * second one bursts on the way out, so a burst lands every 2 * dam_spd ticks.
+ */
+class Lava2 extends Hazard {
+  private readonly period: number
+  private readonly damage: number
+  private armed = false
+
+  constructor(prop: Prop, host: HazardHost) {
+    super(prop, host)
+    const lvars = prop.data.lvars ?? {}
+    this.period = lvars.dam_spd || LAVA2.period
+    this.damage = lvars.dam || LAVA2.damage
+  }
+
+  protected step(): boolean {
+    if (oneIn(LAVA2.soundChance)) {
+      this.host.playSound('LAVA_SND', LAVA2.soundVolume, this.prop.x, this.prop.y)
+    }
+    this.nextPicture()
+
+    if (this.stateTime < this.period) return true
+    this.resetStateTime()
+
+    if (!this.armed) {
+      this.armed = true
+      return true
+    }
+    this.armed = false
+    this.host.hurtRadiusPushed(
+      this.prop.x + LAVA2.offsetX,
+      this.prop.y,
+      LAVA2.radius,
+      this.damage,
+      LAVA2.push,
+    )
+    return true
+  }
+}
+
 /** Builds a hazard for every prop of a type this module owns. */
 export function buildHazards(
   assets: GameAssets,
@@ -314,8 +374,10 @@ export function buildHazards(
         break
       }
       case 'LAVA':
-      case 'LAVA2':
         hazards.push(new Lava(prop, host))
+        break
+      case 'LAVA2':
+        hazards.push(new Lava2(prop, host))
         break
       case 'LIGHTIN':
         hazards.push(new Lightning(prop, host))

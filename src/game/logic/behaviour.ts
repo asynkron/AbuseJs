@@ -8,6 +8,28 @@ export interface LogicWorld {
   readonly host: LogicHost
   /** Live position of any object, whether or not the logic drives it. */
   positionOf(index: number): { x: number; y: number } | undefined
+  /** `(with_object o (progn (set_x ..) (set_y ..)))` - put an object somewhere. */
+  moveObject(index: number, x: number, y: number): void
+  /**
+   * `set_fade_count` - 0 is solid and 15 is nearly gone, the same scale the
+   * teleporters and SNEAKY use.
+   */
+  fadeObject(index: number, fade: number): void
+  /**
+   * `(add_object (with_object (get_object 0) (otype)) x y)` - a fresh copy of
+   * another object's character, at a position.
+   */
+  spawnLike(index: number, x: number, y: number): void
+  /** `(get_light n)` - which lights this object owns. */
+  lightsOf(index: number): readonly number[]
+  /** `set_light_x` / `set_light_y`. */
+  moveLight(light: number, x: number, y: number): void
+  /**
+   * `get_light_value` / `set_light_value`: the object's own light's `r2`, or the
+   * level's ambient when it owns none (lisp/light.lsp:16-24).
+   */
+  lightValue(index: number): number
+  setLightValue(index: number, value: number): void
 }
 
 /**

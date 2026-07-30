@@ -133,6 +133,9 @@ export interface RenderLight extends LightSource {
   readonly tint?: number
 }
 
+/** Per object, the indices into `lighting.lights` it owns - `(get_light n)`. */
+export type LightLinks = number[][]
+
 export interface LightingData {
   /** Ambient floor, 0..63. */
   minLight: number
@@ -149,6 +152,8 @@ export interface LevelData {
   objects: LevelObjectData[]
   /** Per object, the indices of the objects it is wired to. */
   links: number[][]
+  /** Per object, the indices into `lighting.lights` it owns. */
+  lightLinks?: LightLinks
 }
 
 export interface LevelIndexEntry {

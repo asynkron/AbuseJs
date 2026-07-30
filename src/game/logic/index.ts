@@ -5,6 +5,8 @@ import { CombinationalGate, DelayGate, Indicator, PulseGate } from './gates'
 import type { CombinationalKind } from './gates'
 import { LogicObject } from './object'
 import { Platform } from './platforms'
+import { Dimmer, LightHold } from './lights'
+import { DeathRespawner, Pusher, SwitchMover } from './movers'
 import { DeathSensor, Sensor } from './sensors'
 import { SignalNetwork } from './signals'
 import { Spring } from './springs'
@@ -25,6 +27,12 @@ const gate =
 const BEHAVIOURS: Record<string, BehaviourFactory> = {
   // Producers.
   SENSOR: (self, world) => new Sensor(self, world),
+  PUSHER: (self, world) => new Pusher(self, world),
+  LIGHTHOLD: (self, world) => new LightHold(self, world),
+  DIMMER: (self, world) => new Dimmer(self, world),
+  SWITCH_DIMMER: (self, world) => new Dimmer(self, world),
+  SWITCH_MOVER: (self, world) => new SwitchMover(self, world),
+  DEATH_RESPAWNER: (self, world) => new DeathRespawner(self, world),
   DEATH_SENSOR: (self, world) => new DeathSensor(self, world),
   SWITCH: (self, world) => new ToggleSwitch(self, world),
   SWITCH_ONCE: (self, world) => new OnceSwitch(self, world),
@@ -175,6 +183,55 @@ export class LevelLogic implements LogicWorld {
   }
 
   /** Live position of any level object, moving or not. */
+  /**
+   * The three hooks the movers need. None of these objects is driven by the
+   * logic itself - a SWITCH_MOVER shifts an ant, a DEATH_RESPAWNER makes one -
+   * so they go out to the host, which owns the props and the creatures.
+   */
+  moveObject(index: number, x: number, y: number): void {
+    const entry = this.byIndex.get(index)
+    if (entry) {
+      entry.object.x = x
+      entry.object.y = y
+    }
+    this.onMoveObject?.(index, x, y)
+  }
+
+  fadeObject(index: number, fade: number): void {
+    this.onFadeObject?.(index, fade)
+  }
+
+  spawnLike(index: number, x: number, y: number): void {
+    this.onSpawnLike?.(index, x, y)
+  }
+
+  lightsOf(index: number): readonly number[] {
+    return this.lightOwners?.[index] ?? []
+  }
+
+  moveLight(light: number, x: number, y: number): void {
+    this.onMoveLight?.(light, x, y)
+  }
+
+  lightValue(index: number): number {
+    return this.onLightValue?.(index) ?? 0
+  }
+
+  setLightValue(index: number, value: number): void {
+    this.onSetLightValue?.(index, value)
+  }
+
+  /** Set by the world, which owns the light buffer. */
+  lightOwners?: number[][]
+  onMoveLight?: (light: number, x: number, y: number) => void
+  onLightValue?: (index: number) => number
+  onSetLightValue?: (index: number, value: number) => void
+
+  /** Set by the world, which owns everything these three reach for. */
+  onMoveObject?: (index: number, x: number, y: number) => void
+  onFadeObject?: (index: number, fade: number) => void
+  onSpawnLike?: (index: number, x: number, y: number) => void
+
   positionOf(index: number): { x: number; y: number } | undefined {
     const entry = this.byIndex.get(index)
     if (entry) return { x: entry.object.x, y: entry.object.y }

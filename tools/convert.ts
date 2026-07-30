@@ -769,6 +769,7 @@ function readLevel(spec: SpecFile, buf: Buffer, id: string) {
 
   const objects = readObjects(spec, buf)
   const links = readObjectLinks(spec, buf, objects.length)
+  const lightLinks = readLightLinks(spec, buf, objects.length)
 
   const lightEntry = spec.byName.get('lights')
   const lighting = lightEntry
@@ -784,7 +785,40 @@ function readLevel(spec: SpecFile, buf: Buffer, id: string) {
     lighting,
     objects,
     links,
+    lightLinks,
   }
+}
+
+/**
+ * Which lights each object owns - `light_links` (src/level.cpp:1623, 2056).
+ *
+ * Same layout as `object_links`, and 1-based the same way: `u8 RC_32, u32
+ * count, count x (u32 object, u32 light)`. This is what makes `(get_light 0)`
+ * mean something: a LIGHTHOLD carries the lamp it drags around, and a DIMMER
+ * fades its own light rather than the room's.
+ */
+function readLightLinks(spec: SpecFile, buf: Buffer, objectCount: number): number[][] {
+  const links: number[][] = Array.from({ length: objectCount }, () => [])
+  const entry = spec.byName.get('light_links')
+  if (!entry) return links
+
+  let p = entry.offset
+  if (buf.readUInt8(p) !== RC_32) return links
+  p += 1
+
+  const count = buf.readUInt32LE(p)
+  p += 4
+  if (count > 100000) return links
+
+  for (let i = 0; i < count && p + 8 <= buf.length; i++, p += 8) {
+    const owner = buf.readUInt32LE(p) - 1
+    const light = buf.readUInt32LE(p + 4) - 1
+    if (owner < 0 || owner >= objectCount) continue
+    if (light < 0) continue
+    links[owner].push(light)
+  }
+
+  return links
 }
 
 /**

@@ -1,7 +1,7 @@
 import { Container, Graphics, type Renderer } from 'pixi.js'
 
 import type { GameAssets } from '../assets/loader'
-import type { LevelObjectData, RenderLight } from '../assets/types'
+import type { LevelObjectData, LightSource, RenderLight } from '../assets/types'
 import type { AudioBank } from '../audio/AudioBank'
 import { AmbientSounds } from '../audio/AmbientSounds'
 import { Camera } from '../core/camera'
@@ -14,7 +14,7 @@ import { PlayerCombatant, PropCombatant, type Combatant } from './combat'
 import { isBlocked, isGrounded, moveAndCollide, type Body } from './collision'
 import { bloodFor, EffectsSystem, gibFlavourFor, hurtRadius, type BlastSource } from './effects/index'
 import { speed } from './enemies/tuning'
-import { buildEnemies, type EnemyGroup, type EnemyShot, type EnemySound } from './enemies/index'
+import { buildEnemies, createEnemy, type EnemyGroup, type EnemyShot, type EnemySound } from './enemies/index'
 import { buildForceFields, type ForceField } from './ForceField'
 import { Level } from './Level'
 import { LevelLogic, type LogicFocus, type LogicHost } from './logic/index'
@@ -122,6 +122,12 @@ const SNEAKY_THRESHOLD = 0.5
  */
 const HIT_SPRAY_MIN_DAMAGE = 5
 
+/** The ambient floor's ceiling - `minLight` is 0..63. */
+const AMBIENT_MAX = 63
+
+/** `set_fade_count`'s scale: 0 is solid, 15 is all but invisible. */
+const FADE_SCALE = 15
+
 /** The lisp's 0..127 volume scale, which AudioBank works in 0..1. */
 const FULL_VOLUME = 127
 
@@ -178,6 +184,13 @@ export class World {
   private readonly boulders: Boulder[]
   /** Debris from dead boulders, alive until each one lands and bursts. */
   private readonly smallBoulders: SmallBoulder[] = []
+  /**
+   * The level's lights and ambient floor, as a mutable copy. DIMMER and
+   * LIGHTHOLD change both at runtime, which the level's own data cannot carry.
+   */
+  private lights_: LightSource[] = []
+  private ambient = 63
+
   /** Mines, bombs, lava and lightning - lisp/duong.lsp's stationary dangers. */
   private readonly hazards: Hazards
   private readonly forceFields: ForceField[]
@@ -336,6 +349,66 @@ export class World {
     this.focus = new PlayerFocus(this.player, level)
     this.logic = new LevelLogic(level.objects, level.links, this.logicHost())
 
+    // What SWITCH_MOVER and DEATH_RESPAWNER reach for: props and creatures,
+    // which the logic layer does not own.
+    this.logic.onMoveObject = (index, x, y) => {
+      const prop = this.propsByIndex.get(index)
+      if (prop) prop.setPosition(x, y)
+      const enemy = this.enemies.members.find((e) => e.objectIndex === index)
+      if (enemy) enemy.setPosition(x, y)
+    }
+    this.logic.onFadeObject = (index, fade) => {
+      // `set_fade_count` on the 0..15 scale: 0 solid, 15 nearly gone.
+      const alpha = 1 - Math.min(FADE_SCALE, fade) / FADE_SCALE
+      const prop = this.propsByIndex.get(index)
+      if (prop) prop.sprite.alpha = alpha
+      const enemy = this.enemies.members.find((e) => e.objectIndex === index)
+      if (enemy) enemy.sprite.alpha = alpha
+    }
+    // The dimmers and the light-holders mutate lights at runtime, so the
+    // renderer reads this copy rather than the level's own immutable list.
+    this.lights_ = level.lighting.lights.map((l) => ({ ...l }))
+    this.ambient = level.lighting.minLight
+    this.logic.lightOwners = level.lightLinks
+    this.logic.onMoveLight = (light, x, y) => {
+      const l = this.lights_[light]
+      if (l) {
+        l.x = x
+        l.y = y
+      }
+    }
+    // `light_r2` is the light's outer reach; with no light of its own, the
+    // object reads and writes the level's ambient instead.
+    this.logic.onLightValue = (index) => {
+      const own = level.lightLinks[index]?.[0]
+      return own !== undefined ? (this.lights_[own]?.outer ?? 0) : this.ambient
+    }
+    this.logic.onSetLightValue = (index, value) => {
+      const own = level.lightLinks[index]?.[0]
+      if (own !== undefined) {
+        const l = this.lights_[own]
+        if (l) l.outer = Math.max(0, value)
+        return
+      }
+      this.ambient = Math.max(0, Math.min(AMBIENT_MAX, value))
+    }
+
+    this.logic.onSpawnLike = (index, x, y) => {
+      const template = level.objects[index]
+      if (!template) return
+
+      // Most respawners refill pickups, but two in the game point at an
+      // ANT_ROOF - and that has to come back as a creature, not as scenery.
+      const spawn: LevelObjectData = { ...template, x, y, hp: 0, aistate: 0 }
+      const enemy = createEnemy(assets, spawn, -1, this.enemies.battlefield, {})
+      if (enemy) {
+        this.enemies.add(enemy)
+        this.addActor(enemy)
+        return
+      }
+      this.dropPickup(template.type, x, y)
+    }
+
     this.enemies = buildEnemies(assets, level.objects, this.props, {
       level,
       // `boundary_setback` over block_list: the doors, steps, lifts and hidden
@@ -396,6 +469,9 @@ export class World {
       },
       hurtPlayer: (amount) => this.hurtPlayer(amount),
       lavaBurst: (x, y) => this.fx.explosions.lavaEruption(x, y),
+      hurtRadiusPushed: (x, y, radius, amount, push) => {
+        hurtRadius(this.blastTargets(null), x, y, radius, amount, null, push)
+      },
       playSound: (name, vol, x, y) => {
         this.audio.playNamed(name, { volume: vol / FULL_VOLUME, x, y })
       },
@@ -796,6 +872,12 @@ export class World {
       case 'ROB1':
         explosions.robotBlownUp(x, y)
         return explosions.rob1Death(x, y)
+
+      case 'BLOCK':
+        // `block_ai` plays CRUMBLE_SND and lets the `bexplo` frames be the
+        // whole show - no debris cluster of any kind.
+        this.audio.playNamed('CRUMBLE_SND', { volume: 1, x, y })
+        return
 
       case 'BOLDER':
         // `bolder_ai` scatters five SMALL_BOLDERs with authored velocities;
@@ -1462,14 +1544,13 @@ export class World {
     // projectiles are throwing this frame - merged into one array that is
     // reused rather than rebuilt, because with a weapon held down this is
     // every frame rather than only the frames something goes off.
-    const { minLight, lights } = this.level.lighting
     this.dynamicLights.length = 0
     this.dynamicLights.push(...this.fx.lights, ...this.projectiles.lights)
     this.lights.update(
       renderer,
-      lights,
+      this.lights_,
       this.dynamicLights,
-      minLight,
+      this.ambient,
       camera.x,
       camera.y,
       this.zoom,

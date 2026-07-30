@@ -94,6 +94,11 @@ export class Level {
     return this.data.lighting ?? { minLight: 63, lights: [] }
   }
 
+  /** Per object, the indices into `lighting.lights` it owns - `(get_light n)`. */
+  get lightLinks(): number[][] {
+    return this.data.lightLinks ?? []
+  }
+
   /** Per object, the indices of the objects it is wired to. */
   get links(): number[][] {
     return this.data.links ?? []

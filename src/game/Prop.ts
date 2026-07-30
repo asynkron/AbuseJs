@@ -1,6 +1,7 @@
 import type { GameAssets } from '../assets/loader'
 import type { LevelObjectData } from '../assets/types'
 import { Entity } from './Entity'
+import { TICK_SCALE } from './enemies/tuning'
 
 /**
  * A level object rendered from the original placement data - lava, doors,
@@ -69,6 +70,14 @@ export class Prop extends Entity {
   }
 
   advance(dt: number): void {
+    // A death sequence plays out whether or not the character idles: BLOCK's
+    // seven `bexplo` frames are its whole crumble, and `block_ai` steps them
+    // with next_picture until they run out (lisp/duong.lsp:117-124). Without
+    // this it froze on frame 0 for the entire death timer and then vanished.
+    if (this.deathTimer > 0) {
+      if (this.state === 'dieing') this.advanceAnimation(TICK_SCALE)
+      return
+    }
     if (!this.loops) return
     this.advanceAnimation(Prop.FPS * dt)
   }

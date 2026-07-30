@@ -174,7 +174,7 @@ export function buildEnemies(
 
   objects.forEach((object, index) => {
     const overrides = overridesFor?.(object, index) ?? {}
-    const enemy = create(assets, object, index, field, overrides)
+    const enemy = createEnemy(assets, object, index, field, overrides)
     if (!enemy) return
 
     group.add(enemy)
@@ -186,7 +186,7 @@ export function buildEnemies(
   return group
 }
 
-function create(
+export function createEnemy(
   assets: GameAssets,
   object: LevelObjectData,
   index: number,
