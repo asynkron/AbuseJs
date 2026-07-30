@@ -40,6 +40,7 @@ uniform float uIntensity;
 uniform vec2 uScreenSize;
 uniform float uBrightness;
 uniform float uContrast;
+uniform float uNoise;
 
 // --- constants, in the original's 960x540 present space ---
 const float CURVE          = 9.0;    // px the image is squeezed at the edges
@@ -59,6 +60,33 @@ const float BAND_ALPHA     = 0.045;
 const float VIGNETTE_INNER = 0.45;
 const float VIGNETTE_OUTER = 0.95;
 const float VIGNETTE_ALPHA = 0.5;
+
+/**
+ * Noise fields a second. A tube redraws at the mains rate and its noise is
+ * new every field, so this is quantised rather than run off the raw clock -
+ * otherwise the speckle would crawl faster on a 120Hz panel than a 60Hz one.
+ */
+const float NOISE_HZ = 60.0;
+
+/** Peak deviation per channel at full slider, in 0..1 colour. */
+const float NOISE_AMOUNT = 0.16;
+
+/**
+ * Three uncorrelated values in 0..1 from one 3D input - Dave Hoskins' hash33.
+ *
+ * Deliberately not the fract(sin(dot(p, ...)) * 43758.5453) everyone reaches
+ * for first: that one relies on the precision of sin() far outside its useful
+ * range, and drivers disagree about it enough that the pattern bands on some
+ * GPUs and not others. This is arithmetic only.
+ *
+ * No backticks in here, either - the whole shader is a template literal and
+ * one in a comment ends it.
+ */
+vec3 hash33(vec3 p) {
+    p = fract(p * vec3(0.1031, 0.1030, 0.0973));
+    p += dot(p, p.yxz + 33.33);
+    return fract((p.xxy + p.yxx) * p.zyx);
+}
 
 vec3 sampleScene(vec2 frameUv) {
     // Outside the tube there is nothing behind the glass.
@@ -107,6 +135,27 @@ void main() {
     // wrong. As a bonus this is also the space the game's pixels are square
     // in, so the grid stays locked to them across the whole tube.
     vec2 frag = warped * size;
+
+    // --- signal noise -----------------------------------------------------
+    // Analogue noise lives in the signal, so it goes on here: after the tube's
+    // own light has been gathered, before any of the glass in front of it. The
+    // scanlines and the shadow mask then modulate the noise along with the
+    // picture, which is what keeps it sitting *in* the image rather than on
+    // top of it like a dust overlay.
+    //
+    // Three independent channels rather than one shared brightness wobble: a
+    // composite signal carries chroma noise, so the speckle is coloured. One
+    // value applied to all three reads as film grain, which is a different
+    // decade and a different medium.
+    //
+    // Added rather than multiplied, so it shows most in the darks - snow on a
+    // black screen is what a weak signal actually looks like. It is symmetric
+    // about zero, so the mean is unchanged except where the final clamp eats
+    // the negative half at true black.
+    if (uNoise > 0.0) {
+        vec3 speckle = hash33(vec3(frag, floor(uTime * NOISE_HZ))) - 0.5;
+        color += speckle * uNoise * NOISE_AMOUNT;
+    }
 
     // --- scanlines --------------------------------------------------------
     // uGridPeriod is one game pixel (see crtGridPeriod), so this is one
@@ -174,6 +223,8 @@ export interface CrtOptions {
   brightness?: number
   /** 1 = unchanged, pivoting around mid grey. Applied after the CRT pass. */
   contrast?: number
+  /** Analogue speckle, 0 clean to 1 heavy. */
+  noise?: number
 }
 
 export class CrtFilter extends Filter {
@@ -187,6 +238,7 @@ export class CrtFilter extends Filter {
       uScreenSize: { value: new Float32Array([960, 540]), type: 'vec2<f32>' },
       uBrightness: { value: options.brightness ?? 1.05, type: 'f32' },
       uContrast: { value: options.contrast ?? 1.21, type: 'f32' },
+      uNoise: { value: options.noise ?? 0.35, type: 'f32' },
     })
 
     super({
@@ -209,6 +261,7 @@ export class CrtFilter extends Filter {
       uGridPeriod: number
       uGlow: number
       uIntensity: number
+      uNoise: number
       uScreenSize: Float32Array
       uBrightness: number
       uContrast: number
@@ -239,6 +292,15 @@ export class CrtFilter extends Filter {
 
   set glow(value: number) {
     this.uniforms.uGlow = value
+  }
+
+  /** Analogue speckle: 0 is a clean signal, 1 is a bad aerial. */
+  get noise(): number {
+    return this.uniforms.uNoise
+  }
+
+  set noise(value: number) {
+    this.uniforms.uNoise = Math.max(0, Math.min(1, value))
   }
 
   /** Size of the filtered area in device pixels. */

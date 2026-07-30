@@ -55,7 +55,7 @@ const PICTURE_KEY = 'abusejs.picture'
  * The same four numbers appear as the `value` attributes in index.html and as
  * CrtFilter's own fallbacks. Keep the three in step.
  */
-const PICTURE_DEFAULTS = { brightness: 1.05, contrast: 1.21, glow: 2, volume: 0.5 }
+const PICTURE_DEFAULTS = { brightness: 1.05, contrast: 1.21, glow: 2, noise: 0.35, volume: 0.5 }
 
 function loadPictureSettings(): typeof PICTURE_DEFAULTS {
   try {
@@ -68,6 +68,8 @@ function loadPictureSettings(): typeof PICTURE_DEFAULTS {
       contrast: Number(parsed.contrast) || PICTURE_DEFAULTS.contrast,
       // Same reasoning as volume: 0 glow is a deliberate setting, not a miss.
       glow: Number.isFinite(Number(parsed.glow)) ? Number(parsed.glow) : PICTURE_DEFAULTS.glow,
+      // 0 is a deliberate setting - a clean signal - so `||` will not do.
+      noise: Number.isFinite(Number(parsed.noise)) ? Number(parsed.noise) : PICTURE_DEFAULTS.noise,
       // `||` would turn a deliberate 0 back into the default, but 0 is the
       // default here anyway - be explicit so it stays correct if that changes.
       volume: Number.isFinite(volume) ? volume : PICTURE_DEFAULTS.volume,
@@ -82,6 +84,7 @@ function mountPictureControls(
   crt: CrtFilter,
   audio: AudioBank,
   initialGlow: number,
+  initialNoise: number,
   initialVolume: number,
   onVolumeChange: (muted: boolean) => void,
 ): void {
@@ -89,24 +92,28 @@ function mountPictureControls(
   const brightness = document.getElementById('brightness') as HTMLInputElement | null
   const contrast = document.getElementById('contrast') as HTMLInputElement | null
   const glow = document.getElementById('glow') as HTMLInputElement | null
+  const noise = document.getElementById('noise') as HTMLInputElement | null
   const volume = document.getElementById('volume') as HTMLInputElement | null
   const brightnessVal = document.getElementById('brightness-val')
   const contrastVal = document.getElementById('contrast-val')
   const glowVal = document.getElementById('glow-val')
+  const noiseVal = document.getElementById('noise-val')
   const volumeVal = document.getElementById('volume-val')
   const reset = document.getElementById('reset-levels')
-  if (!panel || !brightness || !contrast || !glow || !volume) return
-  if (!brightnessVal || !contrastVal || !glowVal || !volumeVal || !reset) return
+  if (!panel || !brightness || !contrast || !glow || !noise || !volume) return
+  if (!brightnessVal || !contrastVal || !glowVal || !noiseVal || !volumeVal || !reset) return
 
   const sync = (persist: boolean) => {
     crt.brightness = Number(brightness.value)
     crt.contrast = Number(contrast.value)
     crt.glow = Number(glow.value)
+    crt.noise = Number(noise.value)
     audio.volume = Number(volume.value)
 
     brightnessVal.textContent = crt.brightness.toFixed(2)
     contrastVal.textContent = crt.contrast.toFixed(2)
     glowVal.textContent = crt.glow.toFixed(2)
+    noiseVal.textContent = crt.noise.toFixed(2)
     volumeVal.textContent = audio.muted ? 'off' : audio.volume.toFixed(2)
 
     if (persist) {
@@ -117,6 +124,7 @@ function mountPictureControls(
             brightness: crt.brightness,
             contrast: crt.contrast,
             glow: crt.glow,
+            noise: crt.noise,
             volume: audio.volume,
           }),
         )
@@ -129,11 +137,12 @@ function mountPictureControls(
   brightness.value = String(crt.brightness)
   contrast.value = String(crt.contrast)
   glow.value = String(initialGlow)
+  noise.value = String(initialNoise)
   volume.value = String(initialVolume)
   sync(false)
 
   let wasMuted = audio.muted
-  for (const slider of [brightness, contrast, glow, volume]) {
+  for (const slider of [brightness, contrast, glow, noise, volume]) {
     slider.addEventListener('input', () => {
       sync(true)
       if (audio.muted !== wasMuted) {
@@ -151,6 +160,7 @@ function mountPictureControls(
     brightness.value = String(PICTURE_DEFAULTS.brightness)
     contrast.value = String(PICTURE_DEFAULTS.contrast)
     glow.value = String(PICTURE_DEFAULTS.glow)
+    noise.value = String(PICTURE_DEFAULTS.noise)
     volume.value = String(PICTURE_DEFAULTS.volume)
     sync(true)
     reset.blur()
@@ -306,7 +316,7 @@ async function start() {
     crt.intensity = on ? 1 : 0
   }
 
-  mountPictureControls(crt, audio, picture.glow, picture.volume, (muted) => {
+  mountPictureControls(crt, audio, picture.glow, picture.noise, picture.volume, (muted) => {
     // Unmuting has to (re)start the soundtrack, since it never started while
     // silent - and the AudioContext may only just have been unlocked.
     if (muted) music.stop()
