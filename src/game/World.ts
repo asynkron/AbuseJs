@@ -329,6 +329,9 @@ export class World {
 
     this.enemies = buildEnemies(assets, level.objects, this.props, {
       level,
+      // `boundary_setback` over block_list: the doors, steps, lifts and hidden
+      // walls a sight line stops at.
+      sightBlockers: () => this.sightBlockers(),
       isSignalOn: (index) => this.logic.isOn(index),
       hurtPlayer: (amount) => this.hurtPlayer(amount),
       pushPlayer: (dx) => {
@@ -520,6 +523,7 @@ export class World {
     return {
       level: this.level,
       targets: () => this.combatants,
+      sightBlockers: () => this.sightBlockers(),
       // Everything in `combatants` is a Combatant, so this is the same object
       // coming back. The `from` is the projectile's own character name, which
       // is what `get_dead_part` reads to decide whether a corpse comes apart
@@ -1023,6 +1027,20 @@ export class World {
   }
 
   /** Static geometry, plus whatever the logic says is solid this tick. */
+  /**
+   * The boxes `can_see` is occluded by - `block_list` in the original.
+   *
+   * Creature blockers are deliberately left out. The original's list does
+   * include the jugger and the wall guns (both set `can_block`), but a creature
+   * that blocks its neighbours' line of sight can quietly make a whole room
+   * passive, and that is not something this port can be play-tested for here.
+   * The geometry - which is what the "shooting through a closed door" complaint
+   * was about - is all present.
+   */
+  private *sightBlockers(): Iterable<{ left: number; top: number; right: number; bottom: number }> {
+    for (const prop of this.solidObjects()) yield prop.hitBox
+  }
+
   private *solidObjects(): Iterable<Prop> {
     for (const blocker of this.blockers) {
       if (!blocker.isDying && !blocker.isDead) yield blocker

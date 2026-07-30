@@ -1,3 +1,4 @@
+import type { SightBlocker } from '../enemies/raycast'
 /**
  * Everything the projectiles need from the rest of the game, as one interface.
  *
@@ -20,6 +21,13 @@ export interface ProjectileHost {
    * why an ant can catch another ant's fire.
    */
   targets(): readonly ProjectileTarget[]
+
+  /**
+   * The `can_block` boxes a line of sight stops at, for the cop's own muzzle
+   * gate - `(can_see ... nil)` in `player_fire_weapon` tests block_list just
+   * like the AI's does, so a closed door stops him firing through it.
+   */
+  sightBlockers?(): Iterable<SightBlocker>
 
   /**
    * `do_damage(amount, victim, push_xvel, push_yvel)` - directed damage.

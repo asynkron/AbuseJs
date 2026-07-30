@@ -1,3 +1,4 @@
+import type { SightBlocker } from './raycast'
 import type { Level } from '../Level'
 import type { Prop } from '../Prop'
 
@@ -9,6 +10,12 @@ import type { Prop } from '../Prop'
  * shove the player, make a noise, and put an explosion somewhere.
  */
 export interface EnemyContext {
+  /**
+   * The `can_block` objects a sight line is stopped by - closed doors, steps,
+   * lifts and hidden walls. `can_see(..., nil)` tests these in the original;
+   * see SightBlocker in raycast.ts.
+   */
+  sightBlockers(): Iterable<SightBlocker>
   readonly level: Level
 
   /**

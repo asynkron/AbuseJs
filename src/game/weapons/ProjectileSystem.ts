@@ -226,7 +226,7 @@ export class ProjectileSystem {
     // The muzzle inherits the player's velocity, as the lisp's firex/firey do.
     const x = shot.muzzle.x + shot.shooter.vx
     const y = shot.muzzle.y + shot.shooter.vy
-    if (!canSee(this.level, shot.from.x, shot.from.y, x, y)) return false
+    if (!canSee(this.level, shot.from.x, shot.from.y, x, y, this.host.sightBlockers?.())) return false
 
     if (slot.projectile === null) {
       // Only the death ray, which never went through fire_object.

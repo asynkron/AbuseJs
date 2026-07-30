@@ -8,9 +8,9 @@ import type { Level } from '../Level'
  * ceiling by them, and the jugger and the cleaner robot use them as ground and
  * look-ahead probes. collision.ts has boxes but no ray, so this is that ray.
  *
- * Neither call in the original considers objects when the last argument is
- * nil, and every call site in ant.lsp, flyer.lsp and jugger.lsp passes nil -
- * so this is geometry only.
+ * The last argument to `can_see` picks which object list to test, not whether
+ * to test one at all - see SightBlocker below. Callers that have a blocker list
+ * pass it; the pure probes (a cliff test, headroom) do not need one.
  */
 
 /**
@@ -49,8 +49,34 @@ export function isSolidAt(level: Level, x: number, y: number): boolean {
   return span !== null && y >= span.top && y < span.bottom
 }
 
+/**
+ * A blocking object's box, as `boundary_setback` sees it.
+ *
+ * `can_see(x1, y1, x2, y2, nil)` does *not* mean "tiles only". The last
+ * argument picks which object list to test: non-nil gets
+ * `all_boundary_setback` over every hurtable object, and nil gets
+ * `boundary_setback` over `block_list` - the objects whose character sets
+ * `can_block` (src/clisp.cpp:1777-1792, src/level.cpp:477-490). Every AI call
+ * site passes nil, so all of them are still occluded by closed doors, lifts,
+ * steps and hidden walls. Reading nil as "geometry only" let the ants and the
+ * jugger see and shoot straight through a shut door.
+ */
+export interface SightBlocker {
+  readonly left: number
+  readonly top: number
+  readonly right: number
+  readonly bottom: number
+}
+
 /** `can_see`: nothing solid between the two points. */
-export function canSee(level: Level, x1: number, y1: number, x2: number, y2: number): boolean {
+export function canSee(
+  level: Level,
+  x1: number,
+  y1: number,
+  x2: number,
+  y2: number,
+  blockers?: Iterable<SightBlocker>,
+): boolean {
   const dx = x2 - x1
   const dy = y2 - y1
   const length = Math.hypot(dx, dy)
@@ -59,6 +85,49 @@ export function canSee(level: Level, x1: number, y1: number, x2: number, y2: num
   for (let i = 0; i <= steps; i++) {
     const t = i / steps
     if (isSolidAt(level, x1 + dx * t, y1 + dy * t)) return false
+  }
+
+  if (blockers) {
+    for (const box of blockers) {
+      if (segmentBlocked(x1, y1, x2, y2, box)) return false
+    }
+  }
+  return true
+}
+
+/**
+ * Does the segment touch the box? The slab test, so it costs the same whatever
+ * the ray's length - the tile pass above is already the expensive half.
+ */
+export function segmentBlocked(
+  x1: number,
+  y1: number,
+  x2: number,
+  y2: number,
+  box: SightBlocker,
+): boolean {
+  const dx = x2 - x1
+  const dy = y2 - y1
+
+  let near = 0
+  let far = 1
+
+  // One slab per axis; a zero-length component means the ray is parallel to it,
+  // in which case it either starts inside the slab or misses the box entirely.
+  for (const [origin, delta, lo, hi] of [
+    [x1, dx, box.left, box.right],
+    [y1, dy, box.top, box.bottom],
+  ] as const) {
+    if (delta === 0) {
+      if (origin < lo || origin > hi) return false
+      continue
+    }
+    let t0 = (lo - origin) / delta
+    let t1 = (hi - origin) / delta
+    if (t0 > t1) [t0, t1] = [t1, t0]
+    near = Math.max(near, t0)
+    far = Math.min(far, t1)
+    if (near > far) return false
   }
   return true
 }

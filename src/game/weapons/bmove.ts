@@ -1,3 +1,4 @@
+import { segmentBlocked, type SightBlocker } from '../enemies/raycast'
 /**
  * `bmove` - the move-and-report primitive every Abuse projectile is built on.
  *
@@ -204,6 +205,7 @@ export function canSee(
   y1: number,
   x2: number,
   y2: number,
+  blockers?: Iterable<SightBlocker>,
 ): boolean {
   const dx = x2 - x1
   const dy = y2 - y1
@@ -212,7 +214,9 @@ export function canSee(
     const t = i / steps
     if (isSolid(level, x1 + dx * t, y1 + dy * t)) return false
   }
-  return true
+  // The cop's own muzzle gate is `(can_see ... nil)` too (lisp/people.lsp:179),
+  // so a closed door stops him firing through it as well.
+  return blockers ? blockedBySightObject(x1, y1, x2, y2, blockers) === false : true
 }
 
 /**
@@ -239,4 +243,19 @@ export function findTargetInArea(
 /** Half the sprite's height, which several projectiles offset their smoke by. */
 export function halfHeight(frame: Frame | undefined): number {
   return frame ? frame.height / 2 : 0
+}
+
+
+/** True when any blocking object's box lies across the segment. */
+function blockedBySightObject(
+  x1: number,
+  y1: number,
+  x2: number,
+  y2: number,
+  blockers: Iterable<SightBlocker>,
+): boolean {
+  for (const box of blockers) {
+    if (segmentBlocked(x1, y1, x2, y2, box)) return true
+  }
+  return false
 }

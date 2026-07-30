@@ -574,7 +574,7 @@ export class Ant extends Enemy {
    * which is what keeps a room of ants from becoming one continuous noise.
    */
   private screamCheck(player: PlayerView): void {
-    if (canSee(this.world.level, this.x, eyeY(this.y), player.x, eyeY(player.y))) {
+    if (canSee(this.world.level, this.x, eyeY(this.y), player.x, eyeY(player.y), this.world.sightBlockers())) {
       if (this.noSeeTime === 0 || this.noSeeTime > ANT.screamGap) this.playSound('ASCREAM_SND')
       this.noSeeTime = 1
     } else {
@@ -589,7 +589,7 @@ export class Ant extends Enemy {
   /** `can_hit_player`: the cheap pre-test, against the player's chest. */
   private canHitPlayer(player: PlayerView): boolean {
     const muzzle = this.muzzle
-    return canSee(this.world.level, muzzle.x, muzzle.y, player.x, player.y - ANT.muzzleY)
+    return canSee(this.world.level, muzzle.x, muzzle.y, player.x, player.y - ANT.muzzleY, this.world.sightBlockers())
   }
 
   /**
@@ -603,8 +603,8 @@ export class Ant extends Enemy {
     const targetX = player.x + player.vx * ANT.leadTicksX
     const targetY = player.y - ANT.muzzleY + player.vy * ANT.leadTicksY
 
-    if (!canSee(level, this.x, eyeY(this.y), muzzle.x, muzzle.y)) return
-    if (!canSee(level, muzzle.x, muzzle.y, targetX, targetY)) return
+    if (!canSee(level, this.x, eyeY(this.y), muzzle.x, muzzle.y, this.world.sightBlockers())) return
+    if (!canSee(level, muzzle.x, muzzle.y, targetX, targetY, this.world.sightBlockers())) return
 
     const angle = aimAngle(muzzle.x, muzzle.y, targetX, targetY)
     this.world.fire(shotFrom(this.data.aitype, muzzle.x, muzzle.y, angle, this))

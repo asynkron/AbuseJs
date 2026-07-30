@@ -131,7 +131,7 @@ export class CleanerRobot extends Enemy {
     // rather than the floor row underneath it.
     const reach = this.direction * (this.walkSpeed + ROB.lookAhead)
     const eye = eyeY(this.y)
-    if (canSee(this.world.level, this.x, eye, this.x + reach, eye)) {
+    if (canSee(this.world.level, this.x, eye, this.x + reach, eye, this.world.sightBlockers())) {
       this.x += this.direction * this.walkSpeed
     }
 
