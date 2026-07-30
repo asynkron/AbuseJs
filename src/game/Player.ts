@@ -367,7 +367,18 @@ export class Player extends Entity {
     // teleporter, a spring, the 28px ladder step - and a body inside a wall
     // cannot move in any direction at all. This is the only thing that gets him
     // out again.
-    unstick(this.level, this)
+    //
+    // Not while he is on a ladder. `climb_handler` moves him with a bare
+    // `(set_y ...)` and consults no terrain at all, because the top of a shaft
+    // is the floor of the room above and he is meant to pass straight through
+    // it. Unsticking him there fights the climb and wins: he rises until his
+    // head reaches the slab, gets shoved back down the same distance every
+    // tick, and hangs at a fixed height a little below the lip - close enough
+    // to look like a ladder that simply ends, and never inside the 32px window
+    // where pressing up steps him off. The step-off itself lands him back under
+    // ordinary rules on the following tick, which is the case the note above is
+    // really about.
+    if (!this.isClimbing) unstick(this.level, this)
 
     if (this.climbDepth !== null && this.updateClimb(input)) return
 
