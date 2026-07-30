@@ -119,6 +119,13 @@ export function integrate(level: Level, body: Mover): Blocked {
  */
 const BOUNCE_LOSS = speed(2)
 
+/**
+ * The threshold the loss applies above - `(if (> old_yv 1) ...)`. It is a
+ * different number from the loss itself, and using the loss for both let a
+ * band of impact speeds reverse cleanly that should have lost energy.
+ */
+const BOUNCE_MIN = speed(1)
+
 export type BounceSide = 'none' | 'vertical' | 'horizontal'
 
 /**
@@ -137,7 +144,7 @@ export function bounceMove(level: Level, body: Mover): BounceSide {
 
   if (blocked.up || blocked.down) {
     body.vx = previousX
-    body.vy = previousY > BOUNCE_LOSS ? BOUNCE_LOSS - previousY : -previousY
+    body.vy = previousY > BOUNCE_MIN ? BOUNCE_LOSS - previousY : -previousY
     return 'vertical'
   }
 

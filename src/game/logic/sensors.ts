@@ -47,9 +47,11 @@ export class Sensor extends Behaviour {
   private readonly boxes: SensorBoxes
   private readonly holdTicks: number
   /**
-   * `unoffable` (field sens_unoff) - saved in 47 of the 657, never read by the
-   * reference lisp. The name is the only documentation there is, so it is
-   * taken at face value: once tripped, the sensor stays tripped.
+   * `unoffable` (field sens_unoff): once tripped, the sensor stays tripped.
+   *
+   * The reference lisp in switch.lsp never reads it, but the compiled sensor
+   * does - src/sensor.cpp:45, `else if (!o->lvars[un_offable])`, where the
+   * underscore is why the field is easy to miss. 372 sensors set it.
    */
   private readonly latching: boolean
 
@@ -85,13 +87,17 @@ export class Sensor extends Behaviour {
       return
     }
 
+    // src/sensor.cpp:45 tests un_offable *before* the hold countdown, so a
+    // latching sensor freezes outright rather than counting itself back down.
+    // Six sensors save both fields, and this is the difference for them.
+    if (this.latching) return
+
     if (this.holdTicks !== 0) {
       // The aistate value is the remaining hold, counted down a tick at a time.
       this.self.setAiState(this.self.aistate - 1)
       return
     }
 
-    if (this.latching) return
     if (distX > this.boxes.offX || distY > this.boxes.offY) this.self.setAiState(0)
   }
 }

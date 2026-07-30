@@ -100,6 +100,13 @@ const EXIT_PROMPT_Y = 52
 /** Where `player_fire_weapon` measures line of sight from - the torso's chest. */
 const CHEST_HEIGHT = 16
 
+/** `hurt_radius`'s `max_push` at every call site the scripts use. */
+const BLAST_MAX_PUSH = 20
+/** How wide the stand-in for a flash mine's `make_view_solid` reaches. */
+const MINE_FLASH_RADIUS = 400
+/** `(play_sound SBALL_SND 127 ...)` - a boulder's bounce is at full volume. */
+const SBALL_VOLUME = 127
+
 /**
  * How faded the cop has to be before nothing notices him.
  *
@@ -360,6 +367,20 @@ export class World {
       isActivated: (index) => (index >= 0 ? this.logic.isActivated(index) : true),
       explode: (x, y, radius, amount) => {
         this.fx.explosions.doExplo(x, y, radius, amount)
+      },
+      hurtRadius: (x, y, radius, amount) => {
+        hurtRadius(this.blastTargets(null), x, y, radius, amount, null, BLAST_MAX_PUSH)
+      },
+      // `make_view_solid` fills the whole view with one colour for a frame.
+      // Nothing here can do that, so this stands in with a big red flash at
+      // the mine - the same light an explosion adds, tinted and oversized.
+      flashView: () => {
+        this.fx.flash(this.player.x, this.player.y - CHEST_HEIGHT, MINE_FLASH_RADIUS, {
+          tint: 0xfa0a0a,
+        })
+      },
+      extraFireball: (x, y) => {
+        this.fx.particles.spawn('EXPLODE1', x + Math.random() * 10, y + Math.random() * 10 - 20)
       },
       hurtPlayer: (amount) => this.hurtPlayer(amount),
       lavaBurst: (x, y) => this.fx.explosions.lavaEruption(x, y),
@@ -895,7 +916,13 @@ export class World {
       }
 
       if (events.sound) {
-        this.audio.playNamed(events.sound, { volume: 0.6, x: boulder.x, y: boulder.y })
+        // `(play_sound SBALL_SND 127 ...)` - full volume, like every other
+        // sound in the scripts bar the lava's deliberate 64.
+        this.audio.playNamed(events.sound, {
+          volume: SBALL_VOLUME / FULL_VOLUME,
+          x: boulder.x,
+          y: boulder.y,
+        })
       }
       if (events.hurt) {
         hurtRadius(

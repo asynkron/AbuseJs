@@ -21,6 +21,16 @@ export interface HazardHost {
   isActivated(index: number): boolean
   /** `do_explo` - sound, fireballs, light and the blast. */
   explode(x: number, y: number, radius: number, amount: number): void
+  /**
+   * A bare `hurt_radius` with none of `do_explo`'s trimmings. `mine_ai` uses
+   * this rather than `do_explo`, which is what makes a ground mine a silent
+   * trap: no bang, no fireball, no light, just the damage.
+   */
+  hurtRadius(x: number, y: number, radius: number, amount: number): void
+  /** `(with_object (bg) (make_view_solid (find_rgb 250 10 10)))` - a red flash. */
+  flashView(): void
+  /** One extra EXPLODE1, for the high-yield bomb. */
+  extraFireball(x: number, y: number): void
   /** `(do_damage n (bg))` - straight damage to the player, no push. */
   hurtPlayer(amount: number): void
   /** The lava flare's blast - `hurt_radius (x) (y) 20 20 nil 10`. */
@@ -41,6 +51,9 @@ const BOMB_WAKE_Y = 150 + 100
 
 /** `bomb_cons`. Levels can override it through the saved `blink_time` lvar. */
 const BOMB_BLINK = 14
+
+/** `(> (get_ability jump_yvel) 100)` - only BIG_BOMB's 400 clears it. */
+const BIG_BOMB_THRESHOLD = 100
 
 /** `mine_ai`'s blast: 40px, and 35 with the flash variant, 25 without. */
 const MINE_BLAST = { radius: 40, flash: 35, plain: 25 } as const
@@ -113,8 +126,12 @@ abstract class Hazard {
 
 /**
  * CONC - `mine_ai`. Blows its charge the first time the player touches it,
- * then sits there animating the spent shell. The `conc_flash` field lives in
- * `xvel`: 1 marks the variant that flashes the screen and hits harder.
+ * then sits there animating the spent shell.
+ *
+ * Note it uses a bare `hurt_radius`, not `do_explo`: a ground mine goes off
+ * silently, with no fireball and no light. The `conc_flash` field lives in
+ * `xvel`, and 1 marks the variant that whites the screen red and hits for 35
+ * rather than 25.
  */
 class ContactMine extends Hazard {
   private spent = false
@@ -129,8 +146,10 @@ class ContactMine extends Hazard {
 
     if (this.touchingPlayer()) {
       this.setPropState('running')
-      const amount = this.prop.data.xvel === 1 ? MINE_BLAST.flash : MINE_BLAST.plain
-      this.host.explode(this.prop.x, this.prop.y, MINE_BLAST.radius, amount)
+      const flash = this.prop.data.xvel === 1
+      if (flash) this.host.flashView()
+      const amount = flash ? MINE_BLAST.flash : MINE_BLAST.plain
+      this.host.hurtRadius(this.prop.x, this.prop.y, MINE_BLAST.radius, amount)
       this.spent = true
     } else {
       this.nextPicture()
@@ -196,6 +215,9 @@ class Bomb extends Hazard {
       const box = this.prop.hitBox
       const middle = (box.top + box.bottom) / 2
       this.host.explode(this.prop.x, middle, 40, this.damage)
+      // `(if (> (get_ability jump_yvel) 100) (add_object EXPLODE1 ...))` - the
+      // big one gets a third fireball on top of do_explo's two.
+      if (this.damage > BIG_BOMB_THRESHOLD) this.host.extraFireball(this.prop.x, middle)
       return false
     }
 

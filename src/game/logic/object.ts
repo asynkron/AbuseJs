@@ -94,7 +94,7 @@ export class LogicObject {
    * comes from and whether it is the original's or ours.
    */
   variable(name: string, fallback: number): number {
-    const value = this.data.vars?.[name]
+    const value = this.data.lvars?.[name]
     return value === undefined ? fallback : value
   }
 }

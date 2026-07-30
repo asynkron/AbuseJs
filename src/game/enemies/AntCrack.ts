@@ -28,16 +28,13 @@ const CRACK = {
 } as const
 
 /**
- * How many ants a crack pours out when nothing says otherwise.
+ * `crack_cons`'s default, for a crack whose level saved no `create_total`.
  *
- * Invented. crack_cons defaults `create_total` to 1, but that value lives in
- * the level's `lvars` block and every level overrides it - the 156 cracks in
- * the core levels carry 1 to 25, with 5 and 10 much the commonest.
- * tools/convert.ts does not read that block, so the constructor default would
- * make every crack in the game produce a single ant. Five is the mode, and it
- * is the number to delete the moment the converter learns the format.
+ * Only 15 cracks in the whole game are in that position; the rest carry
+ * anything from 1 to 25, which is the number that decides whether a room
+ * trickles one ant at you or buries you in fifteen.
  */
-const CREATE_TOTAL_FALLBACK = 5
+const CREATE_TOTAL_DEFAULT = 1
 
 export class AntCrack extends Enemy {
   private armed: boolean
@@ -51,7 +48,8 @@ export class AntCrack extends Enemy {
     overrides: EnemyOverrides = {},
   ) {
     super(assets, data, objectIndex, world)
-    this.remaining = overrides.createTotal ?? CREATE_TOTAL_FALLBACK
+    this.remaining =
+      overrides.createTotal ?? data.lvars?.create_total ?? CREATE_TOTAL_DEFAULT
     this.armed = data.aistate === 0
     this.setPicture(0)
   }

@@ -2,7 +2,7 @@ import type { GameAssets } from '../../assets/loader'
 import type { LevelObjectData } from '../../assets/types'
 import { Enemy, type Battlefield } from './Enemy'
 import { canSee, eyeY } from './raycast'
-import { random, ticks } from './tuning'
+import { random, TICK_SCALE, ticks } from './tuning'
 import type { PlayerView } from './types'
 import { aimAngle, shotFrom } from './weapons'
 
@@ -200,7 +200,10 @@ export class BossAnt extends Enemy {
     if (this.stateTime === 0) return
 
     if (this.stateTime % BOSS.endgameSoundPeriod === 0) this.playSound('GRENADE_SND')
-    const spread = this.stateTime
+    // The original drives the scatter off `state_time` directly, but its clock
+    // only reaches 60 where ours reaches ticks(60); borrowing the raw count
+    // would spread the fireworks half again as wide as the original's.
+    const spread = this.stateTime * TICK_SCALE
     this.world.explode(this.x + random(spread * 2), this.y + random(spread))
     this.world.explode(this.x - random(spread * 2), this.y - random(spread))
   }
@@ -232,6 +235,10 @@ export class BossAnt extends Enemy {
   override damage(_amount: number): boolean {
     if (this.fade !== 0) return false
     if (this.phase === 'dormant') return false
+    // `(set_targetable nil)` is asserted every tick of the taunt (ant.lsp:663),
+    // and only comes back on in aistate 3 - so the boss cannot be hit, or made
+    // to skip a form, while it is still invisible and taunting.
+    if (this.phase === 'taunting') return false
     if (this.form >= BOSS.forms) return false
 
     this.form++

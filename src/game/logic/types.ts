@@ -29,11 +29,12 @@ export interface LogicObjectData {
   yacel: number
   /**
    * Per-object lisp variables - `delay_time`, `pulse_speed`, `reset_time`,
-   * `unoffable`. They live in the level file's `lvars` chunk, which
-   * tools/convert.ts does not read yet, so this is absent today and every
-   * behaviour that wants one falls back to a documented default.
+   * `unoffable` - out of the level file's `lvars` chunk. The name has to match
+   * `LevelObjectData.lvars`, because the world hands its objects to LevelLogic
+   * as they are: while this was called `vars` the whole logic layer silently
+   * read `undefined` and every gate, delay and sensor ran on its fallback.
    */
-  vars?: Readonly<Record<string, number>>
+  lvars?: Readonly<Record<string, number>>
 }
 
 /** The sounds this subsystem plays, by their name in lisp/sfx.lsp. */
