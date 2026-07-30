@@ -30,6 +30,18 @@ export const CLIMB_OFF_RANGE = 32
 export const CLIMB_OFF_RISE = 28
 /** Pixels of climb per frame of the ten-frame `4lad` cycle. */
 export const CLIMB_FRAME_PITCH = 6
+/** `(and (> ym 0) (< yd 10))` - close enough to the top to step on from above. */
+export const CLIMB_ON_RANGE = 10
+/** `(and (< ym 0) (> yd 8))` - how far below the top reaching up works. */
+export const CLIMB_GRAB_MIN = 8
+/** `(try_move (x) (y) 0 -20 3)` - headroom needed to step off sideways. */
+export const CLIMB_STEP_OFF_RISE = 20
+/**
+ * The original also pans the view by 4px a frame through both transitions
+ * (`pan_y` in climb_on_handler / climb_off_handler), to absorb the 28px step the
+ * cop takes onto and off the ladder. There is nothing to do here: this camera
+ * has a dead zone and exponential smoothing, which is what that pan is for.
+ */
 
 export interface Ladder {
   readonly left: number

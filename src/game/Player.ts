@@ -4,10 +4,17 @@ import type { Frame, GameAssets } from '../assets/loader'
 import type { InputState } from '../core/input'
 import { Entity } from './Entity'
 import { Level } from './Level'
-import { CLIMB_OFF_RANGE, CLIMB_OFF_RISE, CLIMB_SPEED } from './Ladders'
+import {
+  CLIMB_GRAB_MIN,
+  CLIMB_OFF_RANGE,
+  CLIMB_OFF_RISE,
+  CLIMB_ON_RANGE,
+  CLIMB_SPEED,
+  CLIMB_STEP_OFF_RISE,
+} from './Ladders'
 import { BASE_HEALTH_CAP, drawsTorso, scaleDamage, type PowerVisuals } from './powers'
 import { atan2Deg, TORSO_FALLBACK, WEAPON_SLOTS, type WeaponSlot } from './weapons/index'
-import { isGrounded, moveAndCollide } from './collision'
+import { isBlocked, isGrounded, moveAndCollide } from './collision'
 import { accel, GRAVITY, MAX_FALL, speed, TICK_SCALE, ticks } from './enemies/tuning'
 
 /**
@@ -327,15 +334,20 @@ export class Player extends Entity {
   climbCentreX: number | null = null
 
 
+  /**
+   * On a ladder in any of the three climbing states. `climb_handler` owns the
+   * cop through all of them, so everything that defers to the ladder - the
+   * blocker push-out, gravity, the mover - has to treat them alike.
+   */
   get isClimbing(): boolean {
-    return this.state === 'climbing'
+    return this.state === 'climbing' || this.state === 'climb_on' || this.state === 'climb_off'
   }
 
   update(input: InputState, jumpPressed: boolean): void {
     this.prevX = this.x
     this.prevY = this.y
 
-    if (this.climbDepth !== null && this.updateClimb(input, jumpPressed)) return
+    if (this.climbDepth !== null && this.updateClimb(input)) return
 
     // `bottom_draw` takes 7 off the ramp per engine tick, floor zero.
     if (this.hurtRamp > 0) {
@@ -441,43 +453,64 @@ export class Player extends Entity {
    * Returns true while it owns the tick, so the normal physics does not run
    * and gravity never has to be turned off anywhere.
    */
-  private updateClimb(input: InputState, jumpPressed: boolean): boolean {
+  private updateClimb(input: InputState): boolean {
     const depth = this.climbDepth ?? 0
+    const ym = (input.down ? 1 : 0) - (input.up ? 1 : 0)
+    const xm = (input.right ? 1 : 0) - (input.left ? 1 : 0)
 
-    if (!this.isClimbing) {
-      // The original enters `climbing` from the C++ mover rather than from
-      // climb_handler, so this much is ours: a direction press grabs on, and
-      // walking past does not.
-      if (!input.up && !input.down) return false
+    // The two transition animations own the tick while they play.
+    if (this.state === 'climb_off') return this.climbOffStep()
+    if (this.state === 'climb_on') return this.climbOnStep()
+
+    if (this.state !== 'climbing') {
+      // `(else if (and (> ym 0) (< yd 10)))` - stepping on from above. The cop
+      // drops 28px onto the ladder first and then plays himself onto it.
+      if (ym > 0 && depth < CLIMB_ON_RANGE) {
+        this.y += CLIMB_OFF_RISE
+        this.setState('climb_on', true)
+        this.vx = 0
+        this.vy = 0
+        return true
+      }
+
+      // `(else if (and (>= (yvel) 0) (or (> ym 0) (and (< ym 0) (> yd 8)))))` -
+      // he cannot grab on while still rising out of a jump, and reaching up for
+      // a ladder only works once he is far enough below its top.
+      const grabbing = this.vy >= 0 && (ym > 0 || (ym < 0 && depth > CLIMB_GRAB_MIN))
+      if (!grabbing) return false
+
       this.setState('climbing', true)
       this.vx = 0
       this.vy = 0
     }
 
-    // `(if (not (eq xm 0)) ... (set_state run_jump_fall))` - a sideways press
-    // leaves the ladder. Jump does the same, because a player who cannot get
-    // off with the jump key will try it anyway.
-    if (jumpPressed || input.left || input.right) {
-      this.setState('run_jump_fall', true)
-      this.vy = 0
-      return false
-    }
-
-    const cycle = this.frameCount || 1
-    if (input.up) {
-      if (depth < CLIMB_OFF_RANGE) {
-        this.y -= CLIMB_OFF_RISE
-        this.setState('stopped', true)
-        this.climbDepth = null
-        return true
-      }
-      this.setFrame((this.frameIndex + 1) % cycle)
-      this.y -= CLIMB_SPEED
-    } else if (input.down) {
-      // `(if (eq (current_frame) 0) (set_current_frame 9) ...)` - the cycle
-      // runs backwards on the way down.
+    if (ym > 0) {
+      // `(if (eq (current_frame) 0) (set_current_frame 9))` then decrement -
+      // the cycle runs backwards on the way down.
+      const cycle = this.frameCount || 1
       this.setFrame((this.frameIndex + cycle - 1) % cycle)
       this.y += CLIMB_SPEED
+    } else if (ym < 0) {
+      if (depth < CLIMB_OFF_RANGE) {
+        // Near the top, up steps off - as an animation, not a teleport.
+        this.setState('climb_off', true)
+        return true
+      }
+      this.nextClimbFrame()
+      this.y -= CLIMB_SPEED
+    }
+
+    // `(if xm ...)`: stepping off sideways needs 20px of headroom, or he stays
+    // put. Pressing up as well turns it into a jump rather than a step into air.
+    if (xm !== 0 && this.hasClimbHeadroom()) {
+      if (ym < 0) {
+        this.setState('run_jump', true)
+        this.vy = PHYSICS.jumpVelocity
+      } else {
+        this.setState('run_jump_fall', true)
+        this.vy = 0
+      }
+      return false
     }
 
     // `latter_check_area` sets this every tick, not gradually.
@@ -487,6 +520,58 @@ export class Player extends Entity {
     this.vy = 0
     this.onGround = false
     return true
+  }
+
+  /** `climb_on_handler`: play onto the ladder, then start climbing. */
+  private climbOnStep(): boolean {
+    if (!this.nextClimbFrame()) this.setState('climbing', true)
+    this.vx = 0
+    this.vy = 0
+    this.onGround = false
+    return true
+  }
+
+  /** `climb_off_handler`: play off the top, then stand up 28px higher. */
+  private climbOffStep(): boolean {
+    if (!this.nextClimbFrame()) {
+      this.y -= CLIMB_OFF_RISE
+      this.setState('stopped', true)
+      this.climbDepth = null
+    }
+    this.vx = 0
+    this.vy = 0
+    return true
+  }
+
+  /**
+   * One frame of whichever climb animation is up, at the engine's rate.
+   * False on the tick it runs off the end - `next_picture`'s own answer.
+   */
+  private nextClimbFrame(): boolean {
+    const cycle = this.frameCount || 1
+    this.climbCarry += TICK_SCALE
+    if (this.climbCarry < 1) return true
+    this.climbCarry -= 1
+
+    const next = this.frameIndex + 1
+    if (next < cycle) {
+      this.setFrame(next)
+      return true
+    }
+    this.setFrame(0)
+    return false
+  }
+
+  private climbCarry = 0
+
+  /**
+   * `(try_move (x) (y) 0 -20 3)` - 20px of clear headroom before he can step
+   * off sideways. Without it he can walk out of a shaft into solid rock.
+   */
+  private hasClimbHeadroom(): boolean {
+    const y = this.y
+    const clear = !isBlocked(this.level, { ...this, y: y - CLIMB_STEP_OFF_RISE })
+    return clear
   }
 
   private updateAnimation(): void {
