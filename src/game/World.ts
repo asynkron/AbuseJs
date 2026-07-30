@@ -450,6 +450,9 @@ export class World {
         height: this.player.height,
       }),
       isActivated: (index) => (index >= 0 ? this.logic.isActivated(index) : true),
+      setSignal: (index, value) => {
+        if (index >= 0) this.logic.setSignal(index, value)
+      },
       explode: (x, y, radius, amount) => {
         this.fx.explosions.doExplo(x, y, radius, amount)
       },

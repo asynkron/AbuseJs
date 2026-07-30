@@ -19,6 +19,12 @@ export interface HazardHost {
   playerBox(): { x: number; y: number; halfWidth: number; height: number }
   /** Link 0's aistate is non-zero, or there is no link - `(activated)`. */
   isActivated(index: number): boolean
+  /**
+   * `(set_aistate n)` - a hazard is a signal source too. `bomb_ai` walks
+   * 0 waiting -> 1 counting down -> 2 gone, and levels wire a gate to that to
+   * act on a bomb being armed.
+   */
+  setSignal(index: number, value: number): void
   /** `do_explo` - sound, fireballs, light and the blast. */
   explode(x: number, y: number, radius: number, amount: number): void
   /**
@@ -213,10 +219,16 @@ class Bomb extends Hazard {
     this.blink = prop.data.lvars?.blink_time || BOMB_BLINK
   }
 
+  /** `(go_state 1)` - arming is a state change, and a gate may be watching. */
+  private arm(): void {
+    this.phase = 'blinking'
+    if (this.prop.objectIndex >= 0) this.host.setSignal(this.prop.objectIndex, 1)
+  }
+
   protected step(): boolean {
     if (this.phase === 'waiting') {
       if (this.wired) {
-        if (this.activated) this.phase = 'blinking'
+        if (this.activated) this.arm()
         return true
       }
       const player = this.host.playerBox()
@@ -224,7 +236,7 @@ class Bomb extends Hazard {
         Math.abs(player.x - this.prop.x) < BOMB_WAKE_X &&
         Math.abs(player.y - this.prop.y) < BOMB_WAKE_Y
       ) {
-        this.phase = 'blinking'
+        this.arm()
       }
       return true
     }

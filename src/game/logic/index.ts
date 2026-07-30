@@ -36,6 +36,9 @@ const BEHAVIOURS: Record<string, BehaviourFactory> = {
   DEATH_RESPAWNER: (self, world) => new DeathRespawner(self, world),
   DEATH_SENSOR: (self, world) => new DeathSensor(self, world),
   SWITCH: (self, world) => new ToggleSwitch(self, world),
+  // `(def_char SPACE_SWITCH (funs (ai_fun switcher_ai) ...))` - the same ai as
+  // SWITCH with its own art (data/addon/claudio/claudio.lsp:891).
+  SPACE_SWITCH: (self, world) => new ToggleSwitch(self, world),
   SWITCH_ONCE: (self, world) => new OnceSwitch(self, world),
   SWITCH_DELAY: (self, world) => new DelaySwitch(self, world),
   SWITCH_BALL: (self, world) => new BallSwitch(self, world),

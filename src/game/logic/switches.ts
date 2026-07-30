@@ -43,7 +43,11 @@ const TOGGLE_STEP: Record<number, ToggleStep> = {
   4: 'pressedOff',
 }
 
-/** SWITCH - switcher_ai. 52 instances. A latching wall toggle. */
+/**
+ * SWITCH and SPACE_SWITCH - `switcher_ai` (lisp/switch.lsp:4-26). A latching
+ * wall toggle. Both characters name the same ai function and differ only in
+ * their art, so one class serves them.
+ */
 export class ToggleSwitch extends Behaviour {
   protected run(): void {
     // Unconditional and outside the select, so the two-frame art keeps
