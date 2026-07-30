@@ -142,6 +142,19 @@ export class SignalNetwork {
   }
 
   /**
+   * `link_object` - appends, so the new link lands at the end of the list.
+   * Order is the whole meaning of a link: a mover reads `(get_object 0)` as
+   * where it is heading and `(get_object 1)` as what it is carrying.
+   */
+  link(owner: number, target: number): void {
+    const targets = this.outgoing[owner]
+    if (!targets || target < 0 || target >= this.signal.length) return
+    if (targets.includes(target)) return
+    targets.push(target)
+    this.incoming[target]?.push(owner)
+  }
+
+  /**
    * Drops a link, as `remove_object` does inside a death sensor. The pairing
    * has to be maintained by hand because the reverse index is derived.
    */

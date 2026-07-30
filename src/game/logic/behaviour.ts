@@ -1,6 +1,6 @@
 import type { LogicObject } from './object'
 import type { SignalNetwork } from './signals'
-import type { LogicFocus, LogicHost } from './types'
+import type { LogicFocus, LogicHost, LogicObjectData } from './types'
 
 /** What a behaviour is allowed to see of the level around it. */
 export interface LogicWorld {
@@ -8,6 +8,12 @@ export interface LogicWorld {
   readonly host: LogicHost
   /** Live position of any object, whether or not the logic drives it. */
   positionOf(index: number): { x: number; y: number } | undefined
+  /**
+   * `with_object o (...)` for the saved fields - what the level authored for
+   * some *other* object. A mover chain needs it: handing its cargo on means
+   * starting the next mover's countdown from that mover's own frame count.
+   */
+  dataOf(index: number): LogicObjectData | undefined
   /** `(with_object o (progn (set_x ..) (set_y ..)))` - put an object somewhere. */
   moveObject(index: number, x: number, y: number): void
   /**

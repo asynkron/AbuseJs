@@ -6,7 +6,7 @@ import type { CombinationalKind } from './gates'
 import { LogicObject } from './object'
 import { Platform } from './platforms'
 import { Dimmer, LightHold } from './lights'
-import { DeathRespawner, Pusher, SwitchMover } from './movers'
+import { DeathRespawner, Mover, Pusher, SwitchMover } from './movers'
 import { DeathSensor, Sensor } from './sensors'
 import { SignalNetwork } from './signals'
 import { Spring } from './springs'
@@ -32,6 +32,7 @@ const BEHAVIOURS: Record<string, BehaviourFactory> = {
   DIMMER: (self, world) => new Dimmer(self, world),
   SWITCH_DIMMER: (self, world) => new Dimmer(self, world),
   SWITCH_MOVER: (self, world) => new SwitchMover(self, world),
+  OBJ_MOVER: (self, world) => new Mover(self, world),
   DEATH_RESPAWNER: (self, world) => new DeathRespawner(self, world),
   DEATH_SENSOR: (self, world) => new DeathSensor(self, world),
   SWITCH: (self, world) => new ToggleSwitch(self, world),
@@ -252,6 +253,10 @@ export class LevelLogic implements LogicWorld {
     if (entry) return { x: entry.object.x, y: entry.object.y }
     const data = this.objects[index]
     return data ? { x: data.x, y: data.y } : undefined
+  }
+
+  dataOf(index: number): LogicObjectData | undefined {
+    return this.objects[index]
   }
 
   /** Counts for the debug overlay: how much of the network is live. */

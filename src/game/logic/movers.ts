@@ -123,3 +123,94 @@ export class DeathRespawner extends Behaviour {
     }
   }
 }
+
+/**
+ * OBJ_MOVER - `mover_ai` (lisp/common.lsp:59-82, compiled into C but kept in
+ * the script as the readable copy).
+ *
+ * A waypoint on a conveyor for whole objects. Link 0 is the next waypoint and
+ * link 1, when there is one, is the cargo. Each tick the countdown in `aistate`
+ * drops by one and the cargo is placed along the straight line from this
+ * waypoint to the next, at `aistate / frames` of the way back from the far end;
+ * when the count runs out the cargo is handed to link 0, which restarts its own
+ * countdown and takes over. A pair of movers pointing at each other therefore
+ * walks its cargo back and forth forever, which is what the floating CONC_AIR
+ * mines ride - they have no movement of their own at all, `air_mine_ai` only
+ * animates them and waits to be touched.
+ *
+ * There are 445 of these across the shipped levels and none of them did
+ * anything, so every mine, and everything else mounted on a mover chain, simply
+ * hung in the air.
+ */
+
+/** `mover_cons`: `(set_aitype 20)` when the level saved no frame count. */
+const MOVER_DEFAULT_FRAMES = 20
+
+/** `(if (< (aistate) 2) ...)` - the count at which the cargo is handed over. */
+const MOVER_HANDOFF = 2
+
+export class Mover extends Behaviour {
+  /** `aitype` - how many ticks the trip takes, in our ticks rather than the engine's. */
+  private readonly frames: number
+  /** The last point this mover put its cargo, for `platform_push`'s delta. */
+  private placed: { x: number; y: number } | null = null
+
+  constructor(self: LogicObject, world: LogicWorld) {
+    super(self, world)
+    this.frames = Mover.framesOf(self.data)
+
+    // The level saves the countdown in engine ticks, so a mover that starts
+    // part-way along its run has to be restated in ours or it would jump.
+    const saved = self.data.aistate
+    if (saved > 0) self.setAiState(Math.round(saved / TICK_SCALE))
+  }
+
+  /** `(aitype)`, stretched - also needed for the *next* mover on handoff. */
+  private static framesOf(data: { aitype: number }): number {
+    return Math.max(1, Math.round((data.aitype || MOVER_DEFAULT_FRAMES) / TICK_SCALE))
+  }
+
+  protected run(): void {
+    // `(if (eq (total_objects) 2) ... nil)` - a waypoint with nothing to carry
+    // is inert until a neighbour hands it something.
+    const links = this.signals.linksOf(this.self.index)
+    if (links.length !== 2) {
+      this.placed = null
+      return
+    }
+
+    const [dest, cargo] = links
+    const target = this.world.positionOf(dest)
+    if (!target) return
+
+    if (this.self.aistate < MOVER_HANDOFF) {
+      // `(with_object dest (progn (link_object mover) (set_aistate (aitype))))`
+      // then `(remove_object mover)`: the next waypoint picks the cargo up and
+      // starts its own clock, and this one lets go.
+      const onwards = this.world.dataOf(dest)
+      this.signals.link(dest, cargo)
+      this.signals.setState(dest, onwards ? Mover.framesOf(onwards) : this.frames)
+      this.signals.unlink(this.self.index, cargo)
+      this.placed = null
+      return
+    }
+
+    this.self.setAiState(this.self.aistate - 1)
+
+    // `(- dest.x (/ (* (- dest.x self.x) aistate) aitype))`: the full count
+    // leaves the cargo on this waypoint, zero would leave it on the next.
+    const t = this.self.aistate / this.frames
+    const x = target.x - (target.x - this.self.x) * t
+    const y = target.y - (target.y - this.self.y) * t
+
+    // `platform_push` before the move, so anything standing on the cargo goes
+    // with it. The delta is measured against where this mover put the cargo
+    // last tick rather than read back from it, since a mover owns its cargo
+    // outright while it holds it.
+    const from = this.placed ?? this.world.positionOf(cargo)
+    if (from) this.host.carryRiders(cargo, x - from.x, y - from.y)
+
+    this.world.moveObject(cargo, x, y)
+    this.placed = { x, y }
+  }
+}
