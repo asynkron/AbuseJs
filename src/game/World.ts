@@ -413,7 +413,7 @@ export class World {
       level,
       // `boundary_setback` over block_list: the doors, steps, lifts and hidden
       // walls a sight line stops at.
-      sightBlockers: () => this.sightBlockers(),
+      sightBlockers: (exclude) => this.sightBlockers(exclude),
       isSignalOn: (index) => this.logic.isOn(index),
       hurtPlayer: (amount) => this.hurtPlayer(amount),
       pushPlayer: (dx) => {
@@ -1137,12 +1137,10 @@ export class World {
   /**
    * The boxes `can_see` is occluded by - `block_list` in the original.
    *
-   * Creature blockers are deliberately left out. The original's list does
-   * include the jugger and the wall guns (both set `can_block`), but a creature
-   * that blocks its neighbours' line of sight can quietly make a whole room
-   * passive, and that is not something this port can be play-tested for here.
-   * The geometry - which is what the "shooting through a closed door" complaint
-   * was about - is all present.
+   * Only three characters in the whole game are creatures that set `can_block`
+   * - ROB1 and the two wall guns - and all three are machines rather than
+   * hunters, so including them costs nothing in liveliness and is what the
+   * original does.
    */
   /**
    * `unactive_shield` plus `(activated)` being false - the object refuses
@@ -1188,8 +1186,23 @@ export class World {
     }
   }
 
-  private *sightBlockers(): Iterable<{ left: number; top: number; right: number; bottom: number }> {
-    for (const prop of this.solidObjects()) yield prop.hitBox
+  private *sightBlockers(
+    exclude?: Prop,
+  ): Iterable<{ left: number; top: number; right: number; bottom: number }> {
+    for (const prop of this.solidObjects()) {
+      if (prop !== exclude) yield prop.hitBox
+    }
+
+    // The creatures that set `can_block` are on block_list too, so they occlude
+    // as well: ROB1 and the two wall guns, and nothing else in the game. A
+    // creature never blocks its own line - `target != subject` in
+    // boundary_setback (src/level.cpp:487).
+    for (const enemy of this.enemies.members) {
+      if (enemy === exclude) continue
+      if (enemy.isDying || enemy.isDead) continue
+      if (!this.assets.hasFlag(enemy.character, 'can_block')) continue
+      yield enemy.hitBox
+    }
   }
 
   private *solidObjects(): Iterable<Prop> {

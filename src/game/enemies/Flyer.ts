@@ -221,8 +221,8 @@ export class Flyer extends Enemy {
     const targetY = player.y - FLYER.aimHeight + player.vy * FLYER.leadTicksY
     const level = this.world.level
 
-    if (!canSee(level, this.x, eyeY(this.y), muzzleX, muzzleY, this.world.sightBlockers())) return
-    if (!canSee(level, muzzleX, muzzleY, targetX, targetY, this.world.sightBlockers())) return
+    if (!canSee(level, this.x, eyeY(this.y), muzzleX, muzzleY, this.world.sightBlockers(this))) return
+    if (!canSee(level, muzzleX, muzzleY, targetX, targetY, this.world.sightBlockers(this))) return
 
     if (this.burstLeft <= 1) this.fireTime = this.fireDelay
     else this.burstLeft--

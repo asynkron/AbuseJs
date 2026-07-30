@@ -15,7 +15,7 @@ export interface EnemyContext {
    * lifts and hidden walls. `can_see(..., nil)` tests these in the original;
    * see SightBlocker in raycast.ts.
    */
-  sightBlockers(): Iterable<SightBlocker>
+  sightBlockers(exclude?: Prop): Iterable<SightBlocker>
   readonly level: Level
 
   /**

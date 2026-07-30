@@ -69,7 +69,7 @@ export class EnemyGroup {
   constructor(private readonly context: EnemyContext) {
     this.field = {
       level: context.level,
-      sightBlockers: () => context.sightBlockers(),
+      sightBlockers: (exclude) => context.sightBlockers(exclude),
       isSignalOn: (index) => context.isSignalOn(index),
       hurtPlayer: (amount) => context.hurtPlayer(amount),
       pushPlayer: (dx) => context.pushPlayer(dx),

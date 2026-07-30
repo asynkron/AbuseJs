@@ -224,8 +224,8 @@ export class BossAnt extends Enemy {
     const targetY = player.y - BOSS.aimHeight + player.vy * BOSS.leadTicksY
     const level = this.world.level
 
-    if (!canSee(level, this.x, eyeY(this.y), muzzleX, muzzleY, this.world.sightBlockers())) return
-    if (!canSee(level, muzzleX, muzzleY, targetX, targetY, this.world.sightBlockers())) return
+    if (!canSee(level, this.x, eyeY(this.y), muzzleX, muzzleY, this.world.sightBlockers(this))) return
+    if (!canSee(level, muzzleX, muzzleY, targetX, targetY, this.world.sightBlockers(this))) return
 
     this.world.fire(
       shotFrom(this.form, muzzleX, muzzleY, aimAngle(muzzleX, muzzleY, targetX, targetY), this),
