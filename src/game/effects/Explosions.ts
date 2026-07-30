@@ -1,4 +1,4 @@
-import { applyBlastGlow, type BlastSinks } from './blastGlow'
+import { applyBlastGlow, type BlastSinks, type FlareSink } from './blastGlow'
 import type { ExplosionLights } from './lights'
 import type { MoteSink } from './motes'
 import type { Particles } from './Particles'
@@ -45,13 +45,19 @@ export class Explosions {
     private readonly puffs: Particles,
     private readonly lights: ExplosionLights,
     private readonly motes: MoteSink,
+    private readonly flares: FlareSink,
     private readonly audio: SoundPlayer,
     private readonly targets: () => Iterable<Hurtable>,
   ) {
-    this.sinks = { lights: this.lights, motes: this.motes, puffs: this.puffs }
+    this.sinks = {
+      lights: this.lights,
+      motes: this.motes,
+      puffs: this.puffs,
+      flares: this.flares,
+    }
   }
 
-  /** The three sinks `applyBlastGlow` writes to, bundled once. */
+  /** The sinks `applyBlastGlow` writes to, bundled once. */
   private readonly sinks: BlastSinks
 
   // ---------------------------------------------------------------- generic

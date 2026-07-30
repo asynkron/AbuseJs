@@ -10,7 +10,7 @@
 
 // The explicit path matters: macOS filesystems are case-insensitive, so
 // '../effects' is ambiguous with src/game/Effects.ts.
-import { applyBlastGlow, type BlastGlow, type BlastSize } from '../effects/blastGlow'
+import { applyBlastGlow, type BlastGlow, type BlastSize, type FlareSink } from '../effects/blastGlow'
 import type { MoteSink } from '../effects/motes'
 import type { BlastSource } from '../effects/types'
 import type { PuffKind } from '../effects/sprites'
@@ -33,6 +33,8 @@ export interface BurstSink {
   spawn(kind: PuffKind, x: number, y: number, delay?: number, fade?: number): void
   /** The moving particles - fire, smoke, embers, debris. Invented; see motes.ts. */
   readonly motes: MoteSink
+  /** The additive blast glow. Optional so a bare test harness need not have one. */
+  readonly flares?: FlareSink | null
 }
 
 export interface BlastContext {
@@ -81,6 +83,7 @@ function glow(ctx: BlastContext, at: Point, size: BlastSize, extra?: BlastGlow):
       lights: add ? { add: (x, y, outer, options) => add.call(ctx.host, x, y, outer, options) } : null,
       motes: ctx.bursts.motes,
       puffs: ctx.bursts,
+      flares: ctx.bursts.flares ?? null,
     },
     at.x,
     at.y,

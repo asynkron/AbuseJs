@@ -207,6 +207,11 @@ export class World {
    */
   readonly hurtFlash = new Graphics({ blendMode: 'add' })
 
+  /** The additive explosion glow, in screen space. See effects/flares.ts. */
+  get blastGlow(): Container {
+    return this.fx.flares.container
+  }
+
   /**
    * Props that are solid without the logic having an opinion - the hidden
    * walls, mostly, which stand in the middle of a corridor looking like part
@@ -1629,6 +1634,7 @@ export class World {
     )
 
     // The ramp is 0..120 on the palette's 0..255 red channel.
+    this.fx.drawFlares(camera.x, camera.y, this.zoom)
     this.hurtFlash.clear()
     if (this.player.hurtRamp > 0) {
       this.hurtFlash.rect(0, 0, viewW * this.zoom, viewH * this.zoom)
@@ -1773,6 +1779,10 @@ export class World {
   destroy(): void {
     this.projectiles.clear()
     this.fx.clear()
+    // The blast glow hangs off the stage rather than off `root`, so the
+    // recursive destroy below never reaches it. Its gradient textures are
+    // generated per World and would otherwise pile up one set per level load.
+    this.fx.flares.destroy()
     this.lights.destroy()
     this.messages.destroy()
     this.statusBar.destroy()

@@ -1,5 +1,7 @@
+import type { FlareKind } from './flares'
 import type { FlashOptions } from './lights'
 import type { MoteSink } from './motes'
+import { SIM_TICKS_PER_TICK } from './clock'
 import { random } from './random'
 import type { PuffKind } from './sprites'
 
@@ -71,11 +73,23 @@ export interface BlastGlow {
   noLight?: boolean
   /** Engine ticks before the flash appears, for a staged demolition. */
   delay?: number
+  /**
+   * Which ramp the additive glow burns through. Defaults to `fire`; pass
+   * `shock` for anything electrical and `white` for a blast with no heat in it.
+   */
+  flare?: FlareKind
+  /** Suppresses the additive glow on its own, independently of `noLight`. */
+  noFlare?: boolean
 }
 
 /** Whatever can take a flash. `ExplosionLights` and the projectile host both do. */
 export interface FlashSink {
   add(x: number, y: number, outer: number, options?: FlashOptions): void
+}
+
+/** Whatever can take an additive glow. `Flares` does. */
+export interface FlareSink {
+  add(x: number, y: number, radius: number, kind: FlareKind, life: number, peak?: number): void
 }
 
 /** Whatever can spawn the authored one-shot sprites. `Particles` does. */
@@ -92,6 +106,7 @@ export interface BlastSinks {
   readonly lights: FlashSink | null
   readonly motes: MoteSink | null
   readonly puffs: PuffSink | null
+  readonly flares?: FlareSink | null
 }
 
 /**
@@ -109,6 +124,15 @@ const ASH = 0x4a4038
 /** `set_fade_count` on the 0..15 scale - the same value rocket_ai's trail uses. */
 const SMOKE_FADE = 9
 
+/**
+ * How far past the light's own radius the glow reaches.
+ *
+ * Above 1 because the light is sized to brighten a room and the glow is sized
+ * to be seen - at exactly the light's radius the two edges coincide and the
+ * result reads as one flat disc rather than a hot centre in a wash.
+ */
+const FLARE_REACH = 1.25
+
 export function applyBlastGlow(
   sinks: BlastSinks,
   x: number,
@@ -117,7 +141,21 @@ export function applyBlastGlow(
   glow: BlastGlow = {},
 ): void {
   const recipe = RECIPES[size]
-  const { lights, motes, puffs } = sinks
+  const { lights, motes, puffs, flares } = sinks
+
+  // The additive glow, sized off the light rather than the sprite so it reaches
+  // past the fireball - which is the whole point of it. Same lifetime as the
+  // wide flash, so the two agree instead of one outliving the other.
+  if (flares && !glow.noFlare) {
+    flares.add(
+      x,
+      y,
+      recipe.outer * FLARE_REACH,
+      glow.flare ?? 'fire',
+      recipe.ticks * SIM_TICKS_PER_TICK,
+      recipe.peak,
+    )
+  }
 
   if (lights && !glow.noLight) {
     lights.add(x, y, recipe.outer, {

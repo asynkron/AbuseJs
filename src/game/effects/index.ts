@@ -6,6 +6,7 @@ import { Blood } from './Blood'
 import { TickClock } from './clock'
 import { DeathEffects } from './DeathEffects'
 import { Explosions } from './Explosions'
+import { Flares } from './flares'
 import { ExplosionLights, type FlashOptions } from './lights'
 import { Motes, type MoteSink } from './motes'
 import { Particles } from './Particles'
@@ -52,6 +53,12 @@ export class EffectsSystem {
   readonly explosions: Explosions
   readonly gibs: DeathEffects
   readonly motes: Motes
+  /**
+   * The additive blast glow. Its container is screen-space and belongs on the
+   * stage above the light overlay, not in `container` with the rest - see
+   * flares.ts for why.
+   */
+  readonly flares = new Flares()
   readonly blood: Blood
 
   /**
@@ -62,6 +69,7 @@ export class EffectsSystem {
   readonly bursts: {
     spawn: Particles['spawn']
     motes: MoteSink
+    flares: Flares
   }
 
   private readonly clock = new TickClock()
@@ -76,12 +84,14 @@ export class EffectsSystem {
       this.particles,
       this.flashes,
       this.motes,
+      this.flares,
       options.audio,
       options.targets,
     )
     this.bursts = {
       spawn: (kind, x, y, delay, fade) => this.particles.spawn(kind, x, y, delay, fade),
       motes: this.motes,
+      flares: this.flares,
     }
     this.container.addChild(
       this.motes.behind,
@@ -103,6 +113,7 @@ export class EffectsSystem {
     // simply expiring, and five steps of falloff staircases where twenty is
     // smooth. Everything below transcribes a lisp duration and stays at 15 Hz.
     this.flashes.advance()
+    this.flares.advance()
     this.motes.advance()
     this.blood.advance()
 
@@ -110,6 +121,15 @@ export class EffectsSystem {
     this.particles.advance()
     this.gibs.advance()
     this.blood.dry()
+  }
+
+  /**
+   * The blast glow, in screen space. Separate from `draw` because it is the one
+   * layer that needs the camera - everything else lives inside the world's own
+   * transform.
+   */
+  drawFlares(cameraX: number, cameraY: number, zoom: number): void {
+    this.flares.draw(cameraX, cameraY, zoom)
   }
 
   /** `alpha` is the loop's leftover fraction of a sim tick. */
@@ -144,6 +164,7 @@ export class EffectsSystem {
     this.particles.clear()
     this.gibs.clear()
     this.flashes.clear()
+    this.flares.clear()
     this.motes.clear()
     this.blood.clear()
     this.clock.reset()

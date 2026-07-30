@@ -262,7 +262,7 @@ async function start() {
     const data = await assets.loadLevel(id)
 
     if (world) {
-      app.stage.removeChild(world.root, world.lights.overlay, world.hurtFlash, world.statusBar.container, world.messages.container)
+      app.stage.removeChild(world.root, world.lights.overlay, world.blastGlow, world.hurtFlash, world.statusBar.container, world.messages.container)
       world.destroy()
     }
 
@@ -272,8 +272,11 @@ async function start() {
     world.root.scale.set(zoom)
     // The light overlay multiplies over the finished scene, so it sits on top
     // of the world but still inside the stage, and therefore under the CRT.
+    // The blast glow is additive and goes *after* the overlay: a fireball in an
+    // unlit corner is exactly where it matters, and under the multiply it would
+    // be scaled back down to the darkness it is supposed to be beating.
     // Messages go above the lighting - a tutorial line should not be in shadow.
-    app.stage.addChild(world.root, world.lights.overlay, world.hurtFlash, world.statusBar.container, world.messages.container)
+    app.stage.addChild(world.root, world.lights.overlay, world.blastGlow, world.hurtFlash, world.statusBar.container, world.messages.container)
     world.resize(viewWidth, viewHeight, zoom)
     // A fresh World defaults to gore on, so the preference has to be pushed
     // back in on every level.
