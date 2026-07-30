@@ -1,3 +1,4 @@
+import { playerAccel } from '../../enemies/tuning'
 import { BASE_HEALTH_CAP } from '../healing'
 import type { PowerEffect, PowerHost, PowerInput } from '../types'
 
@@ -15,11 +16,19 @@ import type { PowerEffect, PowerHost, PowerInput } from '../types'
  * so the README's "up and down steer" was our invention and is dropped here.
  */
 
-/** `(set_yvel (- (yvel) 2))` every tick held. */
-const THRUST = 2
+/**
+ * `(set_yvel (- (yvel) 2))` every tick held.
+ *
+ * A change in velocity per tick is an acceleration, so it converts like
+ * gravity does rather than like a speed - and it has to, because what flying
+ * feels like is the balance between the two. Left raw it was 2 against
+ * gravity's `playerAccel(1)` of 0.44, a net climb 3.5x what the original
+ * builds, which is a cop who leaves the level through the ceiling.
+ */
+const THRUST = playerAccel(2)
 
 /** `(if (< ym 0) (set_yvel (- (yvel) 1)))` - one more while up is held. */
-const UP_THRUST = 1
+const UP_THRUST = playerAccel(1)
 
 /** `(if (> (yvel) 0) (set_yvel (/ (yvel) 2)))` - falling speed halved on contact with the button. */
 const FALL_DAMPING = 2
