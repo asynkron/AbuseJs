@@ -52,6 +52,9 @@ export class FlyPower implements PowerEffect {
       host.y + this.below(CLOUD_JITTER),
     )
 
+    // `the_game->play_sound(S_FLY_SND, 32, ...)` every tick FLY is held.
+    host.playSound?.('FLY_SND')
+
     host.setLegState(FLY_STATE)
     // The original also clears yacel and re-asserts gravity 1 here; this engine
     // has no acceleration field and never turns gravity off, so both are moot.

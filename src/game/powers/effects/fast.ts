@@ -18,6 +18,9 @@ import { PLAIN_VISUALS, type Ghost, type PowerEffect, type PowerHost, type Power
  */
 
 /** Extra ticks knocked off `fire_delay1` per tick held - `do_special_power`. */
+/** `(mod (game_tick) 16)` - how often FAST chirps while it is held. */
+const SPEED_SOUND_EVERY = 16
+
 const COOLDOWN_BURN = 1
 
 /**
@@ -59,6 +62,12 @@ export class FastPower implements PowerEffect {
     this.running = true
     this.older = { x: host.x, y: host.y }
     host.coolWeapon?.(COOLDOWN_BURN)
+
+    // `if ((current_level->tick_counter()%16)==0) play_sound(S_SPEED_SND, ...)`
+    // - src/cop.cpp:475, counted on the level's tick rather than a local one.
+    if (host.tick !== undefined && host.tick % SPEED_SOUND_EVERY === 0) {
+      host.playSound?.('SPEED_SND')
+    }
 
     // Captured before the extra step, because that is the step that starts the
     // jump: the boost only applies on the tick the cop leaves the ground.

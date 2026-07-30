@@ -66,9 +66,9 @@ export const WEAPON_SLOTS: readonly WeaponSlot[] = [
     top: 'MGUN_TOP',
     // ammo_type maps MGUN_TOP to 10, the red variant - not the yellow 0 the AI use.
     projectile: PROJECTILE_TYPE.playerBullet,
-    // laser_ufun: 3 ticks with ammo, 7 without. The only gun that dry-fires.
+    // laser_ufun: 3 ticks with ammo, 5 without (src/cop.cpp:274). The only gun that dry-fires.
     fireDelay: 3,
-    dryFireDelay: 7,
+    dryFireDelay: 5,
     ammoCost: 1,
   },
   {

@@ -394,6 +394,15 @@ export class World {
     })
 
     this.powerHost = new CopPowerHost(this.player, this.fx)
+    // FLY's thrum and FAST's chirp, at the volumes cop.cpp passes (32 and 100).
+    this.powerHost.emit = (name) => {
+      const volume = name === 'FLY_SND' ? 32 : 100
+      this.audio.playNamed(name, {
+        volume: volume / FULL_VOLUME,
+        x: this.player.x,
+        y: this.player.y,
+      })
+    }
     this.powers = new Powers(this.powerHost, {
       hasLegState: (state) => assets.hasState('DARNEL', state),
     })
@@ -456,6 +465,7 @@ export class World {
     // `(player_move xm ym but)` (lisp/people.lsp). Running it after would
     // double the previous tick's motion instead of this one's.
     this.powerHost.buttons = input.state
+    this.powerHost.tick = this.now
     if (!this.player.isDead) {
       this.powers.update({
         xm: axis(input.state.left, input.state.right),
@@ -1190,7 +1200,9 @@ export class World {
       if (power.grant) {
         givePlayerHealth(this.player, power.grant, { cap: this.powers.healthCap })
       }
-      this.audio.playNamed('HEALTH_UP_SND', { volume: 0.6, x: prop.x, y: prop.y })
+      // No sound: none of fast_ai, fly_power_ai, sneaky_power_ai or
+      // health_power_ai plays one (lisp/powerup.lsp:39-108), and neither does
+      // `give_player_health`. The heart's HEALTH_UP_SND is the heart's own.
       return true
     }
 
@@ -1199,7 +1211,9 @@ export class World {
       // at full health leaves the heart lying there for later.
       const healed = givePlayerHealth(this.player, HEART_HEAL, { cap: this.powers.healthCap })
       if (!healed) return false
-      this.audio.playNamed('HEALTH_UP_SND', { volume: 0.6, x: prop.x, y: prop.y })
+      // No sound: none of fast_ai, fly_power_ai, sneaky_power_ai or
+      // health_power_ai plays one (lisp/powerup.lsp:39-108), and neither does
+      // `give_player_health`. The heart's HEALTH_UP_SND is the heart's own.
       return true
     }
 
@@ -1709,6 +1723,15 @@ class PlayerFocus implements LogicFocus {
  * - `do_special_power` runs a second `player_move` before the tick's own.
  */
 class CopPowerHost {
+  /** Set each tick by the world, for FAST's every-sixteenth-tick sound. */
+  tick = 0
+  /** Set by the world so the powers can be heard. */
+  emit: ((name: 'FLY_SND' | 'SPEED_SND') => void) | null = null
+
+  playSound(name: 'FLY_SND' | 'SPEED_SND'): void {
+    this.emit?.(name)
+  }
+
   /**
    * The buttons this tick was read with. FAST's extra step re-uses them rather
    * than inventing its own, so holding shift still decides how fast the second

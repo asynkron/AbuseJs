@@ -92,6 +92,15 @@ export interface PowerHost {
   spawnCloud?(x: number, y: number): void
 
   /**
+   * FLY thrums every tick it is held and FAST chirps every sixteenth
+   * (src/cop.cpp:471, :475). Optional, so a host with no audio still flies.
+   */
+  playSound?(name: 'FLY_SND' | 'SPEED_SND'): void
+
+  /** `(game_tick)`, for the cadence FAST's sound is counted on. */
+  readonly tick?: number
+
+  /**
    * Runs `body` with ladder state held across it.
    *
    * `do_special_power` saves `in_climbing_area` around FAST's extra step and

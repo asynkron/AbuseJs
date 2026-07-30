@@ -96,8 +96,9 @@ function tickMachineGun(bullet: MachineGunBullet, ctx: TickContext): void {
   // Zeroing the lifetime rather than dying outright leaves this tick's streak
   // on screen; the bullet goes on the next one.
   bullet.lifetime = 0
-  const x = bullet.x - randomBelow(5)
-  const y = bullet.y - randomBelow(5)
+  // `o->x+jrand()%4` (src/cop.cpp:938) - added, and 0..3, not subtracted 0..4.
+  const x = bullet.x + randomBelow(4)
+  const y = bullet.y + randomBelow(4)
 
   if (outcome.kind === 'wall') {
     ctx.bursts.spawn('EXPLODE5', x, y)
@@ -359,9 +360,11 @@ function tickStraitRocket(rocket: StraitRocket, ctx: TickContext): void {
   if (outcome.kind === 'clear') return
 
   if (outcome.kind === 'wall') {
-    // EG_EXPLO picks its wall-splash state when the block was to either side.
-    const sideways = outcome.sides.includes('left') || outcome.sides.includes('right')
-    ctx.bursts.spawn(sideways ? 'EG_EXPLO_WALL' : 'EG_EXPLO', rocket.x, rocket.y)
+    // Always the plain splash. `eg_explo_ufun` takes its sideways branch only
+    // `(if block_flags ...)`, and `strait_rocket_ai` hands it `(car stat)` where
+    // `stat` is nil on a wall hit - so block_flags is always nil and the "bilw"
+    // variant is unreachable in the original (ant.lsp:71-100).
+    ctx.bursts.spawn('EG_EXPLO', rocket.x, rocket.y)
     rocket.alive = false
     return
   }
