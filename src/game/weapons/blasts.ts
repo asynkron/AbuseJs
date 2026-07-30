@@ -92,6 +92,26 @@ function glow(ctx: BlastContext, at: Point, size: BlastSize, extra?: BlastGlow):
   )
 }
 
+/**
+ * The flash where a shot bites masonry.
+ *
+ * Invented. The original marks a wall hit with one small sprite - EXPLODE5 for
+ * the machine gun, MGUN_HIT1/2 in the lisp - and nothing else, so a firefight
+ * against a wall is a row of little white smudges that light nothing.
+ *
+ * Uses the `shock` ramp rather than `fire`: a round striking stone throws
+ * sparks, and sparks are white going blue, not the yellow-to-red of something
+ * burning. Deliberately small and brief - the machine gun puts several of
+ * these up a second, and anything longer or wider turns sustained fire into a
+ * strobe.
+ */
+const WALL_SPARK = { radius: 30, ticks: 8, peak: 0.7 } as const
+
+export function wallSpark(ctx: BlastContext, x: number, y: number): void {
+  if (frameSkip(ctx.host)) return
+  ctx.bursts.flares?.add(x, y, WALL_SPARK.radius, 'shock', WALL_SPARK.ticks, WALL_SPARK.peak)
+}
+
 /** `do_explo (radius amount)` - the ordinary orange blast. */
 export function doExplo(
   ctx: BlastContext,

@@ -18,7 +18,7 @@ import { bmove, canSee, findTargetInArea } from './bmove'
 import type { MovingPoint, ProjectileLevel, ProjectileOwner, ProjectileTarget } from './bmove'
 import { tickProjectile } from './behaviour'
 import type { TickContext } from './behaviour'
-import type { BurstSink } from './blasts'
+import { wallSpark, type BurstSink } from './blasts'
 import { MUZZLE, WeaponGlow } from './glow'
 import type { ProjectileHost } from './host'
 import { ascatterLine, drawLine, rgb, scatterLine } from './lines'
@@ -386,6 +386,7 @@ export class ProjectileSystem {
 
     if (impact.outcome.kind === 'wall') {
       this.bursts.spawn('EXPLODE5', impact.x - randomBelow(5), impact.y - randomBelow(5))
+      wallSpark({ host: this.host, bursts: this.bursts }, impact.x, impact.y)
     } else if (impact.outcome.kind === 'object') {
       this.bursts.spawn('EXPLODE3', impact.x - randomBelow(5), impact.y - randomBelow(5))
       // The lisp pushes with `(cos sgb_angle)`, but sgb_angle is never

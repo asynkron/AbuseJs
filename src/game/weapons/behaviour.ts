@@ -21,7 +21,15 @@ import {
 import { bmove, findTargetInArea, moveUnderGravity } from './bmove'
 import type { MoveOutcome, ProjectileLevel, ProjectileTarget } from './bmove'
 import { accel, MAX_FALL, speed, ticks, TICK_SCALE } from '../enemies/tuning'
-import { blastSource, doDeathRayExplo, doExplo, doWhiteExplo, frameSkip, quickLight } from './blasts'
+import {
+  blastSource,
+  doDeathRayExplo,
+  doExplo,
+  doWhiteExplo,
+  frameSkip,
+  quickLight,
+  wallSpark,
+} from './blasts'
 import { firebombFlames, rocketExhaust } from './exhaust'
 import type { BlastContext } from './blasts'
 import type {
@@ -102,6 +110,7 @@ function tickMachineGun(bullet: MachineGunBullet, ctx: TickContext): void {
 
   if (outcome.kind === 'wall') {
     ctx.bursts.spawn('EXPLODE5', x, y)
+    wallSpark(ctx, x, y)
     return
   }
 
