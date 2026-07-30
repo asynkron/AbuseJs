@@ -488,6 +488,7 @@ export class World {
     this.logic.tick()
     this.applyLogicViews()
     this.rideLifts()
+    this.updateHiddenWalls()
     this.updateForceFields()
     this.updateBoulders()
     this.hazards.update()
@@ -689,6 +690,11 @@ export class World {
    */
   private hurtProp(prop: Prop, amount: number, from: BlastSource | null): void {
     if (prop.isDying || prop.isDead) return
+    // `hwall_damage` wraps the whole thing in `(if (activated) ...)`, and the
+    // `unactive_shield` flag is what marks a character that works that way: a
+    // hidden wall wired to a switch cannot be shot open before the switch has
+    // been thrown. An unlinked one is activated by default and still can be.
+    if (this.isShielded(prop)) return
     // SWITCH_BALL latches on the first hit; nothing else in the logic cares.
     if (prop.objectIndex >= 0) this.logic.reportDamage(prop.objectIndex)
 
@@ -1037,6 +1043,50 @@ export class World {
    * The geometry - which is what the "shooting through a closed door" complaint
    * was about - is all present.
    */
+  /**
+   * `unactive_shield` plus `(activated)` being false - the object refuses
+   * damage entirely. Eighteen characters carry the flag; the hidden walls are
+   * all of them that a level actually wires up.
+   */
+  private isShielded(prop: Prop): boolean {
+    if (!this.assets.hasFlag(prop.character, 'unactive_shield')) return false
+    if (prop.objectIndex < 0) return false
+    return !this.logic.isActivated(prop.objectIndex)
+  }
+
+  /**
+   * `hwall_ai` and `big_wall_ai` (lisp/doors.lsp:130-152).
+   *
+   * A hidden wall wired to exactly one object blows itself open the moment that
+   * object's aistate goes non-zero - no shot required. That is the game's
+   * commonest reveal: throw the switch, the wall comes down. 2,434 of the 5,093
+   * wall segments in the shipped levels are wired that way and were all sitting
+   * inert, waiting to be shot instead.
+   *
+   * The blast itself is `deathEffect`'s already - `hiddenWallBlast` and
+   * `bigWallBlast` carry the authored hurt_radius - so this only has to decide
+   * when a wall dies.
+   */
+  private updateHiddenWalls(): void {
+    for (const prop of this.blockers) {
+      if (prop.isDying || prop.isDead) continue
+      if (!this.assets.hasFlag(prop.character, 'unactive_shield')) continue
+      if (prop.objectIndex < 0) continue
+
+      // `(and (eq (total_objects) 1) (with_object (get_object 0) (not (eq (aistate) 0))))`
+      const links = this.level.links[prop.objectIndex] ?? []
+      if (links.length !== 1) continue
+      if (!this.logic.isOn(links[0])) continue
+
+      // Straight to the death path: the shield above would refuse ordinary
+      // damage, and the wall is not being shot - it is being triggered.
+      if (prop.kill()) {
+        this.kills++
+        this.deathEffect(prop, null)
+      }
+    }
+  }
+
   private *sightBlockers(): Iterable<{ left: number; top: number; right: number; bottom: number }> {
     for (const prop of this.solidObjects()) yield prop.hitBox
   }

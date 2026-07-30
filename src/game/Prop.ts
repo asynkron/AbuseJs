@@ -151,6 +151,19 @@ export class Prop extends Entity {
     this.deathTimer = hasCorpse ? Prop.DEATH_TICKS : 1
     return true
   }
+
+  /**
+   * Kills the object outright, whatever health it had left.
+   *
+   * `hwall_ai` returning nil is not damage - a wired hidden wall comes down
+   * because its switch went on, and at that moment its `unactive_shield` would
+   * refuse a shot. Returns false if it was already dying.
+   */
+  kill(): boolean {
+    if (this.deathTimer > 0 || this.dead) return false
+    this.health = 1
+    return this.damage(1)
+  }
 }
 
 /** Objects worth putting in the world: known, drawable, not editor-only. */
