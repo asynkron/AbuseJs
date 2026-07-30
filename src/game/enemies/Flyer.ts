@@ -115,6 +115,9 @@ export class Flyer extends Enemy {
       if (this.nextPicture()) return true
       this.awake = true
       this.setState('running', true)
+      // `(set_aistate 1)` - the one aistate change flyer_ai makes, and so the
+      // one place its rotor clock starts from zero.
+      this.resetStateTime()
       return true
     }
 
@@ -206,9 +209,11 @@ export class Flyer extends Enemy {
     }
 
     if (this.distX(player) >= FLYER.fireDistX) return
-    // `(eq (direction) (facing))` - the two only disagree while the turn
-    // animation is playing, so this is "not mid-turn".
-    if (this.state === 'turn_around') return
+    // The original's second condition, `(eq (direction) (facing))`, is dead:
+    // `direction` returns the field and `facing` returns its sign (src/clisp.cpp
+    // cases 56 and 14), and the field is only ever 1 or -1, so the test is
+    // always true. Treating it as "not mid-turn" silenced the flyer through
+    // every turn animation, which the original never does.
 
     const muzzleX = this.x + this.direction * FLYER.muzzleX
     const muzzleY = this.y

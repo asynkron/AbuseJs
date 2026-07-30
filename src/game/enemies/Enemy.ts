@@ -57,7 +57,19 @@ export abstract class Enemy extends Prop {
   /** Whether the last `nextPicture` call actually stepped a frame on. */
   private advancedFrame = false
 
-  /** Ticks since the state or the AI state last changed - `state_time`. */
+  /**
+   * `state_time` - which is really `aistate_time`.
+   *
+   * The engine increments it once per tick and zeroes it only when `aistate`
+   * changes (src/objects.cpp:431-433), and `set_aistate`/`go_state` zero it
+   * explicitly (src/clisp.cpp:1099, :589). A plain `set_state` - an art change -
+   * never touches it. Resetting it on art changes too made every timer that
+   * outlives an animation restart spuriously: the flyer's rotor note skipped a
+   * beat on each turn, because turning swaps its art but not its aistate.
+   *
+   * So this is reset by `resetStateTime`, which subclasses call where the
+   * original calls `set_aistate`, and by nothing else.
+   */
   protected stateTime = 0
 
   /** Set by `think` returning false: this creature is finished. */
@@ -122,9 +134,13 @@ export abstract class Enemy extends Prop {
     super.setState(state, restart)
     if (this.state !== previous || restart) {
       this.pictureIndex = 0
-      this.stateTime = 0
       this.animCarry = 0
     }
+  }
+
+  /** `set_aistate` / `go_state`: the only thing that zeroes `state_time`. */
+  protected resetStateTime(): void {
+    this.stateTime = 0
   }
 
   /** Switches state only if the character actually has that animation. */

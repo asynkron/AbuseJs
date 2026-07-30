@@ -6,7 +6,7 @@ import { Entity } from './Entity'
 import { Level } from './Level'
 import { CLIMB_OFF_RANGE, CLIMB_OFF_RISE, CLIMB_SPEED } from './Ladders'
 import { BASE_HEALTH_CAP, drawsTorso, scaleDamage, type PowerVisuals } from './powers'
-import { TORSO_FALLBACK, WEAPON_SLOTS, type WeaponSlot } from './weapons/index'
+import { atan2Deg, TORSO_FALLBACK, WEAPON_SLOTS, type WeaponSlot } from './weapons/index'
 import { isGrounded, moveAndCollide } from './collision'
 
 /**
@@ -67,6 +67,45 @@ const MUZZLE_OFFSETS: readonly (readonly [number, number])[] = [
   [-19, 20], [-19, 16], [-16, 14], [-14, 11], [-11, 9], [-7, 8],
   [-3, 8], [2, 8], [6, 9], [10, 10], [14, 13], [16, 15],
 ]
+
+/**
+ * The pivot the aim frames are measured from - `int iy=f[1], ix=f[6*2]` in
+ * src/cop.cpp:163, which is frame 0's y and frame *6*'s x. Not a centre, just
+ * the two numbers the original happens to pick.
+ */
+const AIM_PIVOT_X = MUZZLE_OFFSETS[6][0]
+const AIM_PIVOT_Y = MUZZLE_OFFSETS[0][1]
+
+/**
+ * The heading each aim frame inherently points, from its own muzzle offset.
+ *
+ * This is what makes the frame choice non-uniform: the 24 offsets are not
+ * evenly spaced around the pivot, so dividing the aim angle by 24 picks a
+ * different frame than the original's nearest-angle search does over most of
+ * the circle (src/cop.cpp:166-176).
+ */
+const AIM_FRAME_ANGLES: readonly number[] = MUZZLE_OFFSETS.map(([x, y]) =>
+  atan2Deg(y - AIM_PIVOT_Y, x - AIM_PIVOT_X),
+)
+
+/**
+ * `abs(q->y - fb[1] - pointer_y) < 45 && abs(pointer_x - q->x + fb[0]) < 40`
+ * (src/cop.cpp:183): with the crosshair this close to the muzzle, the shot goes
+ * where the arm is pointing rather than at the crosshair, so aiming at your own
+ * feet does not produce a wild angle.
+ */
+const AIM_SNAP_Y = 45
+const AIM_SNAP_X = 40
+
+/**
+ * `angle_diff` from src/cop.cpp:126 - the shortest way round between two
+ * headings, 0..180. Not the same function as the `angleDiff` in
+ * weapons/angles.ts, which reproduces the frisbee's deliberately broken one.
+ */
+function shortestArc(a: number, b: number): number {
+  const d = Math.abs(a - b) % 360
+  return d > 180 ? 360 - d : d
+}
 
 /** A weapon swap costs a beat, so cycling is not a free rate-of-fire boost. */
 const WEAPON_SWITCH_DELAY = 8
@@ -195,11 +234,36 @@ export class Player extends Entity {
 
   /** Points the torso at a world-space position. */
   aimAt(worldX: number, worldY: number): void {
-    const dx = worldX - this.x
-    const dy = worldY - (this.y - this.height * 0.6)
-    // Screen y grows downward; aim angles grow counter-clockwise.
-    this.aimAngle = (Math.atan2(-dy, dx) * 180) / Math.PI
+    // `lisp_atan2(q->y - iy - pointer_y, pointer_x - q->x - ix)` - the heading
+    // from the arm's pivot to the crosshair (src/cop.cpp:165).
+    const wanted = atan2Deg(this.y - AIM_PIVOT_Y - worldY, worldX - this.x - AIM_PIVOT_X)
+
+    // Pick the frame whose own heading is closest to that.
+    let best = 0
+    let bestDiff = Infinity
+    for (let i = 0; i < AIM_FRAME_ANGLES.length; i++) {
+      const diff = shortestArc(AIM_FRAME_ANGLES[i], wanted)
+      if (diff < bestDiff) {
+        bestDiff = diff
+        best = i
+      }
+    }
+    this.aimFrame = best
+
+    const [offX, offY] = MUZZLE_OFFSETS[best]
+    const muzzleY = this.y - offY
+    const muzzleX = this.x + offX
+
+    // Close in, the shot follows the arm; otherwise it follows the crosshair.
+    if (Math.abs(muzzleY - worldY) < AIM_SNAP_Y && Math.abs(worldX - muzzleX) < AIM_SNAP_X) {
+      this.aimAngle = AIM_FRAME_ANGLES[best]
+    } else {
+      this.aimAngle = atan2Deg(muzzleY - worldY, worldX - muzzleX)
+    }
   }
+
+  /** Which of the 24 offsets the search settled on, for the torso and muzzle. */
+  private aimFrame = 0
 
   /**
    * How far below the top of a ladder the cop is, or null when not on one.
@@ -498,14 +562,18 @@ export class Player extends Entity {
     this.topSprite.y = Math.round(y - frame.height + 1)
   }
 
-  /** Which of the 24 aim frames the torso is showing. */
+  /**
+   * Which of the 24 aim frames the torso is showing - the one `aimAt` chose.
+   *
+   * The original searches the offset table rather than dividing the circle
+   * evenly, and it does not mirror the index for a left-facing cop: the 24
+   * offsets already sweep the whole circle, from +17 on the right round to -20
+   * on the left, so there is nothing to mirror.
+   */
   private get topFrameIndex(): number {
     const count = this.topFrames.length
     if (count === 0) return 0
-    // Frame 0 aims due right; mirroring the sprite mirrors the angle too.
-    const angle = this.direction >= 0 ? this.aimAngle : 180 - this.aimAngle
-    const normalized = ((angle % 360) + 360) % 360
-    return Math.round((normalized / 360) * count) % count
+    return this.aimFrame % count
   }
 
   /** Picks the aim frame, accounting for the sprite being mirrored. */
@@ -518,12 +586,11 @@ export class Player extends Entity {
    * mirrored when facing left.
    */
   get muzzle(): { x: number; y: number } {
+    // Taken as it stands: the chosen frame already points the way the cop is
+    // aiming, so there is no mirroring to undo. Mirroring it was the other half
+    // of the old evenly-divided frame lookup.
     const offset = MUZZLE_OFFSETS[this.topFrameIndex] ?? MUZZLE_OFFSETS[0]
-    const flipped = this.direction < 0
-    return {
-      x: this.x + (flipped ? TOP_FLIP_NUDGE - offset[0] : offset[0]),
-      y: this.y - offset[1],
-    }
+    return { x: this.x + offset[0], y: this.y - offset[1] }
   }
 
   /**

@@ -278,7 +278,7 @@ export class Ant extends Enemy {
   /** `set_aistate`: takes effect next tick. */
   private setPhase(phase: AntPhase): void {
     this.phase = phase
-    this.stateTime = 0
+    this.resetStateTime()
   }
 
   /** `go_state`: takes effect now, in this tick. */

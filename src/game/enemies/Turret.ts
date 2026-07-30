@@ -175,7 +175,7 @@ export class Turret extends Enemy {
         this.angle = this.startAngle
         this.aimBarrel()
         this.spray = 'sweepingDown'
-        this.stateTime = 0
+        this.resetStateTime()
         return true
 
       case 'sweepingDown':
@@ -193,8 +193,10 @@ export class Turret extends Enemy {
    * something that aims.
    */
   private sweep(): boolean {
-    if (++this.stateTime <= this.fireDelay) return true
-    this.stateTime = 0
+    // Enemy.update has already counted this tick; counting it again here made
+    // the gun step and fire on every other tick regardless of its fire delay.
+    if (this.stateTime <= this.fireDelay) return true
+    this.resetStateTime()
 
     if (this.spray === 'sweepingDown') {
       this.angle -= this.angleSpeed

@@ -117,7 +117,7 @@ export class BossAnt extends Enemy {
 
   private setPhase(phase: BossPhase): void {
     this.phase = phase
-    this.stateTime = 0
+    this.resetStateTime()
   }
 
   private goPhase(phase: BossPhase): void {

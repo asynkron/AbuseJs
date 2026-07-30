@@ -141,7 +141,7 @@ export class Jugger extends Enemy {
 
   private setPhase(phase: JugPhase): void {
     this.phase = phase
-    this.stateTime = 0
+    this.resetStateTime()
   }
 
   private goPhase(phase: JugPhase): void {

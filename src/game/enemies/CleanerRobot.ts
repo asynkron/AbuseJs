@@ -113,7 +113,7 @@ export class CleanerRobot extends Enemy {
     }
     this.setState('stopped', true)
     this.phase = 'walking'
-    this.stateTime = 0
+    this.resetStateTime()
     return true
   }
 
@@ -158,7 +158,7 @@ export class CleanerRobot extends Enemy {
 
     // rob1_ai's eight staggered fireballs and its BLOWN_UP are the host's -
     // the pattern is authored over six ticks and needs the spawn delay.
-    this.stateTime = 0
+    this.resetStateTime()
     return true
   }
 }
