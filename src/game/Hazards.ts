@@ -19,6 +19,8 @@ export interface HazardHost {
   playerBox(): { x: number; y: number; halfWidth: number; height: number }
   /** Link 0's aistate is non-zero, or there is no link - `(activated)`. */
   isActivated(index: number): boolean
+  /** A lava surface bubbling, per sim tick. Purely cosmetic; see effects/lava.ts. */
+  lavaSimmer?(box: { left: number; right: number; top: number }): void
   /**
    * `(set_aistate n)` - a hazard is a signal source too. `bomb_ai` walks
    * 0 waiting -> 1 counting down -> 2 gone, and levels wire a gate to that to
@@ -102,6 +104,7 @@ abstract class Hazard {
 
   /** Runs at 60Hz; dispenses original 15Hz-scale ticks to `step`. */
   update(): boolean {
+    this.perFrame()
     this.carry += TICK_SCALE
     while (this.carry >= 1) {
       this.carry -= 1
@@ -113,6 +116,15 @@ abstract class Hazard {
 
   /** One original tick. Returning false removes the hazard (and its prop). */
   protected abstract step(): boolean
+
+  /**
+   * Every sim tick, for cosmetics only.
+   *
+   * `step` runs at the engine's 15Hz because everything in it transcribes a
+   * lisp constant. Particles run at 60Hz and would strobe at a quarter of it,
+   * so anything purely visual hangs off this instead.
+   */
+  protected perFrame(): void {}
 
   protected resetStateTime(): void {
     this.stateTime = 0
@@ -270,6 +282,10 @@ class Bomb extends Hazard {
 class Lava extends Hazard {
   private erupting = false
 
+  protected override perFrame(): void {
+    this.host.lavaSimmer?.(this.prop.hitBox)
+  }
+
   protected step(): boolean {
     if (this.touchingPlayer() && this.stateTime % LAVA.damagePeriod === 0) {
       this.host.hurtPlayer(LAVA.damage)
@@ -326,6 +342,10 @@ class Lava2 extends Hazard {
   private readonly period: number
   private readonly damage: number
   private armed = false
+
+  protected override perFrame(): void {
+    this.host.lavaSimmer?.(this.prop.hitBox)
+  }
 
   constructor(prop: Prop, host: HazardHost) {
     super(prop, host)

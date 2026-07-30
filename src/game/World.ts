@@ -13,6 +13,8 @@ import { TileLayer } from '../render/TileLayer'
 import { PlayerCombatant, PropCombatant, type Combatant } from './combat'
 import { isBlocked, isGrounded, moveAndCollide, type Body } from './collision'
 import { bloodFor, EffectsSystem, gibFlavourFor, hurtRadius, type BlastSource } from './effects/index'
+import { lavaSimmer } from './effects/lava'
+import { flyExhaust } from './weapons/exhaust'
 import { speed } from './enemies/tuning'
 import { buildEnemies, createEnemy, type EnemyGroup, type EnemyShot, type EnemySound } from './enemies/index'
 import { buildForceFields, type ForceField } from './ForceField'
@@ -450,6 +452,12 @@ export class World {
         height: this.player.height,
       }),
       isActivated: (index) => (index >= 0 ? this.logic.isActivated(index) : true),
+      lavaSimmer: (box) => {
+        if (!this.onScreen(box.left, box.top)) return
+        lavaSimmer(this.fx.motes, box, (kind, x, y, fade) =>
+          this.fx.particles.spawn(kind, x, y, 0, fade),
+        )
+      },
       setSignal: (index, value) => {
         if (index >= 0) this.logic.setSignal(index, value)
       },
@@ -1638,6 +1646,21 @@ export class World {
    * and left un-animated - nothing observes them, so nothing is lost, and a
    * big level can hold several hundred.
    */
+/**
+   * Roughly inside the view, for cosmetics that would otherwise run for every
+   * copy of something in the level. A big level's lava is dozens of tiles and
+   * only the ones you can see are worth spending motes on.
+   */
+  private onScreen(x: number, y: number): boolean {
+    const margin = 64
+    return (
+      x >= this.camera.x - margin &&
+      x <= this.camera.x + this.camera.viewWidth + margin &&
+      y >= this.camera.y - margin &&
+      y <= this.camera.y + this.camera.viewHeight + margin
+    )
+  }
+
   private updateProps(
     cameraX: number,
     cameraY: number,
@@ -1975,4 +1998,9 @@ class CopPowerHost {
   spawnCloud(x: number, y: number): void {
     this.fx.particles.spawn('CLOUD', x, y)
   }
+
+  spawnFlyFlame(x: number, y: number, facing: number): void {
+    flyExhaust(this.fx.motes, x, y, facing)
+  }
+
 }

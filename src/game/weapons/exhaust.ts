@@ -51,6 +51,37 @@ export function rocketExhaust(motes: MoteSink, rocket: Moving, scale = 1): void 
   })
 }
 
+/** Straight down, in the engine's angles. */
+const DOWN = 270
+
+/** How far behind the cop the pack sits - the same 10 the CLOUD puff uses. */
+const PACK_BEHIND = 10
+
+/**
+ * The jetpack plume under the cop while FLY is held.
+ *
+ * Invented, in the same terms as the rocket's: `do_special_power` gives FLY one
+ * CLOUD a tick and nothing else, which reads as a man being followed by smoke
+ * rather than a man being pushed by something. The flame is what makes the
+ * thrust legible, so it uses the rocket's own recipe - amber, additive, no
+ * gravity, heavy drag - and the CLOUD stays as the smoke, exactly as the rocket
+ * keeps the original's SMALL_LIGHT_CLOUD over a mote-based jet.
+ *
+ * Wider and slower than the rocket's: this is a man hovering, not a warhead.
+ */
+export function flyExhaust(motes: MoteSink, x: number, y: number, facing: number): void {
+  motes.burst(3, x - facing * PACK_BEHIND, y, DOWN, 24, 2, 1, {
+    life: 5 + randomBelow(5),
+    gravity: 0,
+    drag: 0.85,
+    colour: FIRE_HOT,
+    fadeTo: FIRE_COOL,
+    size: 2,
+    sizeTo: 1,
+    blend: 'add',
+  })
+}
+
 /**
  * The firebomb. `fb_draw` returns nil, so the bomb itself is never drawn at
  * all and the flames are the entire thing you see - which in the original is

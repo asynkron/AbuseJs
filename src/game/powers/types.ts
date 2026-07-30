@@ -92,6 +92,13 @@ export interface PowerHost {
   spawnCloud?(x: number, y: number): void
 
   /**
+   * The flame under the pack, per sim tick. Separate from `spawnCloud` because
+   * they run at different rates and are different media: the smoke is the
+   * original's own sprite at the engine's 15Hz, the flame is motes at 60Hz.
+   */
+  spawnFlyFlame?(x: number, y: number, facing: number): void
+
+  /**
    * FLY thrums every tick it is held and FAST chirps every sixteenth
    * (src/cop.cpp:471, :475). Optional, so a host with no audio still flies.
    */

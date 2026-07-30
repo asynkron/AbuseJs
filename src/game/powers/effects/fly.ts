@@ -1,3 +1,4 @@
+import { SIM_TICKS_PER_TICK } from '../../effects/clock'
 import { playerAccel } from '../../enemies/tuning'
 import { BASE_HEALTH_CAP } from '../healing'
 import type { PowerEffect, PowerHost, PowerInput } from '../types'
@@ -49,17 +50,25 @@ export class FlyPower implements PowerEffect {
   readonly healthCap = BASE_HEALTH_CAP
   readonly legPrefix = 'fly_'
 
+  /** Counts sim ticks down to the engine tick the CLOUD is spawned on. */
+  private puffCarry = 0
+
   constructor(private readonly random: Random = Math.random) {}
 
   hold(host: PowerHost, input: PowerInput): void {
-    // CLOUD is one of the characters `def_explo` builds in lisp/explo.lsp,
-    // which the converter cannot expand, so it is absent from chars.json and
-    // the host has nothing to spawn yet. The puff is cosmetic; the thrust is
-    // not, so the power still flies without it.
-    host.spawnCloud?.(
-      host.x + host.facing * -CLOUD_BEHIND + this.below(CLOUD_JITTER),
-      host.y + this.below(CLOUD_JITTER),
-    )
+    // `(add_object CLOUD ...)` once per *engine* tick. Ours runs four times as
+    // often, and four times the smoke buries the cop in it.
+    this.puffCarry -= 1
+    if (this.puffCarry <= 0) {
+      this.puffCarry = SIM_TICKS_PER_TICK
+      host.spawnCloud?.(
+        host.x + host.facing * -CLOUD_BEHIND + this.below(CLOUD_JITTER),
+        host.y + this.below(CLOUD_JITTER),
+      )
+    }
+
+    // The flame, every sim tick, because that is the clock the motes run on.
+    host.spawnFlyFlame?.(host.x, host.y, host.facing)
 
     // `the_game->play_sound(S_FLY_SND, 32, ...)` every tick FLY is held.
     host.playSound?.('FLY_SND')
