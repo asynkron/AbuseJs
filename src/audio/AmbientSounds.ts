@@ -1,3 +1,4 @@
+import { TICK_SCALE } from '../game/enemies/tuning'
 import type { LevelObjectData } from '../assets/types'
 import type { AudioBank } from './AudioBank'
 
@@ -29,9 +30,12 @@ interface Emitter {
   countdown: number
 }
 
-/** Emitters further than this from the listener do not tick. */
-const EARSHOT = 700
-/** Fallback when a level leaves the repeat delay at zero. */
+/**
+ * `(range 500 500)` on AMBIENT_SOUND (lisp/sfx.lsp:254) - the box the engine
+ * activates an emitter in, and so how far away it can be heard from.
+ */
+const EARSHOT = 500
+/** `ambs_cons`'s fallback when a level leaves the repeat delay at zero. */
 const DEFAULT_DELAY_TICKS = 100
 
 export class AmbientSounds {
@@ -71,7 +75,10 @@ export class AmbientSounds {
       if (Math.abs(dx) > EARSHOT || Math.abs(dy) > EARSHOT) continue
 
       if (emitter.countdown > 0) {
-        emitter.countdown--
+        // The delay is counted in the original's ticks, so it stretches like
+        // any other duration - at 60Hz raw, a 100-tick emitter repeated every
+        // 1.7s instead of the intended 10.
+        emitter.countdown -= TICK_SCALE
         continue
       }
 

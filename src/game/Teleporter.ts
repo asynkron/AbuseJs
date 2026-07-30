@@ -1,3 +1,4 @@
+import { TICK_SCALE } from './enemies/tuning'
 import type { GameAssets } from '../assets/loader'
 import type { LevelObjectData } from '../assets/types'
 import { Prop } from './Prop'
@@ -26,8 +27,11 @@ const ARRIVAL_LIFT = 16
 /** How close the player has to be to use one. */
 const REACH_X = 22
 const REACH_Y = 36
-/** Frames per second for the spin. */
-const SPIN_FPS = 20
+/**
+ * Frames per tick the spin runs at - one frame per engine tick, in ours. It was
+ * an ad hoc 20fps, which ran the pad a quarter faster than the original.
+ */
+const SPIN_RATE = TICK_SCALE
 /** `(if (< (current_frame) 16) (current_frame) 15)` - the fade tops out here. */
 const FADE_CAP = 15
 
@@ -47,7 +51,7 @@ export class Teleporter extends Prop {
     this.setState(assets.hasState(data.type, 'stopped') ? 'stopped' : data.state, true)
 
     const spin = assets.animation(data.type, 'running')
-    this.spinTicks = Math.max(1, Math.round((spin.length / SPIN_FPS) * 60))
+    this.spinTicks = Math.max(1, Math.round(spin.length / SPIN_RATE))
   }
 
   get isCharging(): boolean {
@@ -79,7 +83,7 @@ export class Teleporter extends Prop {
     if (!this.charging) return { hold: null, arrival: null }
 
     this.elapsed++
-    this.advanceAnimation(SPIN_FPS / 60)
+    this.advanceAnimation(SPIN_RATE)
 
     if (this.elapsed < this.spinTicks) {
       // `(if (< (current_frame) 16) (current_frame) 15)`, except the count has

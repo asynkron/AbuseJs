@@ -2,6 +2,7 @@ import { Graphics } from 'pixi.js'
 
 import type { LevelObjectData } from '../assets/types'
 import type { Level } from './Level'
+import { moveAndCollide, type Body } from './collision'
 
 /**
  * The force fields - the thing the blue "FF" markers stand for.
@@ -29,10 +30,17 @@ import type { Level } from './Level'
 const FLOOR_PROBE = 200
 /** Segment height the scatter is quantised to. */
 const SEGMENT = 3
-/** How hard the field shoves, from `ff_push (first_focus) 35`. */
-const PUSH = 3.2
-/** How wide a band around the beam pushes. */
-const PUSH_REACH = 14
+/**
+ * `(ff_push (first_focus) 35)` - and 35 is a clearance, not a strength.
+ *
+ * `ff_push` computes `35 - dx` on the right, or `-(35 - |dx|)` on the left, and
+ * hands that to `try_move`: one tick puts the player at exactly 35px from the
+ * beam, as far as the geometry allows. Nudging 3.2px within 14px instead let a
+ * player stand well inside a live field.
+ */
+const PUSH_CLEARANCE = 35
+/** `(<= bgy (+ end_y 20))` - how far past the floor end the band still acts. */
+const SPAN_SLACK = 20
 /** Ticks between FF_SND, from `(eq (mod (game_tick) 4) 0)`. */
 const SOUND_EVERY = 4
 
@@ -56,7 +64,11 @@ export class ForceField {
 
   private phase = 0
 
-  constructor(data: LevelObjectData, objectIndex: number, level: Level) {
+  constructor(
+    data: LevelObjectData,
+    objectIndex: number,
+    private readonly level: Level,
+  ) {
     this.x = data.x
     this.y = data.y
     this.objectIndex = objectIndex
@@ -67,16 +79,18 @@ export class ForceField {
    * Pushes the player away from the beam and reports whether the field wants
    * its sound this tick.
    */
-  update(tick: number, player: { x: number; y: number; vx: number; height: number }): boolean {
+  update(tick: number, player: Body): boolean {
     this.phase++
     if (!this.active) return false
 
-    const withinSpan = player.y > this.y - 8 && player.y - player.height < this.endY + 8
+    // `(and (>= bgy (y)) (<= bgy (+ end_y 20)))` - measured at the feet, so a
+    // player whose head clips the beam but whose feet are above it is missed,
+    // exactly as the original misses them.
+    const withinSpan = player.y >= this.y && player.y <= this.endY + SPAN_SLACK
     const dx = player.x - this.x
-    if (withinSpan && Math.abs(dx) < PUSH_REACH) {
-      const away = dx === 0 ? 1 : Math.sign(dx)
-      player.x += away * PUSH
-      player.vx = away * Math.abs(player.vx || PUSH)
+    if (withinSpan && Math.abs(dx) < PUSH_CLEARANCE) {
+      const amount = dx > 0 ? PUSH_CLEARANCE - dx : -(PUSH_CLEARANCE - Math.abs(dx))
+      moveAndCollide(this.level, player, amount, 0)
     }
 
     return tick % SOUND_EVERY === 0

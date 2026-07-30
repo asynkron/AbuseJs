@@ -1,3 +1,4 @@
+import { TICK_SCALE } from '../enemies/tuning'
 import type { SignalNetwork } from './signals'
 import type { LogicHost, LogicObjectData, PictureSize } from './types'
 
@@ -62,6 +63,7 @@ export class LogicObject {
   setState(state: string): void {
     this.state = this.host.hasState(this.type, state) ? state : 'stopped'
     this.frame = 0
+    this.animCarry = 0
   }
 
   /**
@@ -74,6 +76,16 @@ export class LogicObject {
   nextPicture(): boolean {
     const total = this.host.frameCount(this.type, this.state)
     if (total === 0) return false
+
+    // The engine steps one frame per 15Hz tick; we are called at 60Hz with
+    // every other rate scaled, so a frame is worth 1/TICK_SCALE calls. Without
+    // this a door, a spring flash or a lift's animation ran through half again
+    // too fast relative to everything around it - same accumulator as
+    // Enemy.nextPicture.
+    this.animCarry += TICK_SCALE
+    if (this.animCarry < 1) return true
+    this.animCarry -= 1
+
     if (this.frame + 1 < total) {
       this.frame++
       return true
@@ -82,6 +94,9 @@ export class LogicObject {
     return false
   }
 
+  /** Fraction of a frame carried between calls - see `nextPicture`. */
+  private animCarry = 0
+
   get picture(): PictureSize {
     return this.host.pictureSize(this.type, this.state, this.frame)
   }
@@ -89,9 +104,8 @@ export class LogicObject {
   /**
    * A per-object lisp variable from the level's `lvars` chunk.
    *
-   * tools/convert.ts does not read that chunk yet, so in practice every one of
-   * these resolves to its fallback. Each call site says where its fallback
-   * comes from and whether it is the original's or ours.
+   * Each call site says where its fallback comes from - the original's
+   * constructor, or ours - for the objects whose level saved no value.
    */
   variable(name: string, fallback: number): number {
     const value = this.data.lvars?.[name]

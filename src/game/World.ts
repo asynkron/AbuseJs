@@ -494,6 +494,7 @@ export class World {
     this.pushOutOfBlockers()
     this.collectPickups()
     this.updateEnemies()
+    this.waitForContinue(input)
     this.retireDead()
     this.fx.update()
 
@@ -1050,15 +1051,29 @@ export class World {
       hidden: this.powers.concealment > SNEAKY_THRESHOLD,
     })
 
-    // Respawn once the death animation has run its course.
-    if (player.isDead) return
-    if (player.health <= 0) {
-      // Back to the last console used, or the level's start if there was none.
-      player.revive(this.restartAt.x, this.restartAt.y)
-      // `restart_player` drops the power along with everything else.
-      this.powers.clear()
-      this.riding = null
+  }
+
+  /**
+   * `cop_mover`'s aistate 3: the cop lies where he fell showing `space_cont`
+   * until Space or Enter goes down, and only then does `restart_player` run
+   * (src/cop.cpp:678-692). Space is bound to jump here and Enter to action, so
+   * either counts - which is the same pair the original watches for.
+   */
+  private waitForContinue(input: Input): void {
+    const player = this.player
+    if (!player.isDead) return
+    if (!player.isAwaitingContinue) return
+
+    if (!input.state.jump && !input.state.action) {
+      this.messages.prompt('Press space to continue')
+      return
     }
+
+    // Back to the last console used, or the level's start if there was none.
+    player.revive(this.restartAt.x, this.restartAt.y)
+    // `restart_player` drops the power along with everything else.
+    this.powers.clear()
+    this.riding = null
   }
 
   /**

@@ -1,3 +1,4 @@
+import { TICK_SCALE } from './enemies/tuning'
 import type { GameAssets } from '../assets/loader'
 import type { LevelObjectData } from '../assets/types'
 import { Prop } from './Prop'
@@ -39,10 +40,13 @@ const INVIS_USE_RANGE_X = 15
 const INVIS_USE_RANGE_Y = 20
 /** The five `door1..5` frames; `open_door` stops at frame 4. */
 const OPEN_FRAME = 4
-/** Frames per tick the shutter runs at. Not in the lisp - `open_door` steps
- * one frame per call and the engine calls it every tick, which at 60Hz is
- * twice the original's rate, so it is halved here. */
-const SLIDE_SPEED = 0.5
+/**
+ * Frames per tick the shutter runs at. `open_door` steps one frame per engine
+ * tick, so this is that rate in ours - the same TICK_SCALE every other
+ * animation in the port steps at. It was 0.5, picked from the mistaken idea
+ * that 60Hz is twice 15Hz.
+ */
+const SLIDE_SPEED = TICK_SCALE
 
 export class TeleportDoor extends Prop {
   /** The door this one is wired to, resolved after all of them are built. */

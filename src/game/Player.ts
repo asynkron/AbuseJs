@@ -115,8 +115,15 @@ const OBJECT_SUPPORT_TICKS = 4
 const STARTING_AMMO = 50
 /** Ticks of invulnerability after being hit, so one turret cannot chain-kill. */
 const HURT_INVULNERABLE = 30
-/** Ticks the death animation holds before respawning. */
-const DEATH_TICKS = 120
+/**
+ * The cop stays down until the player asks to carry on.
+ *
+ * `cop_mover` holds aistate 3 showing `space_cont` and only restarts when
+ * Space or Enter is down (src/cop.cpp:678-692) - there is no timer in that path
+ * at all, so the old 120-tick auto-respawn pulled you back into play whether
+ * you were ready or not.
+ */
+const DEATH_SETTLE_TICKS = 30
 
 /** How a power renames the leg animations, when one is being held. */
 export interface LegStateFilter {
@@ -145,6 +152,8 @@ export class Player extends Entity {
   legStates: LegStateFilter = { legState: (base) => base }
 
   private invulnerable = 0
+  /** Down and waiting for the player to press on - not a timer. */
+  private dead = false
 
   /**
    * `is_teleporting` and its fade count, set by whichever teleporter has hold
@@ -187,7 +196,15 @@ export class Player extends Entity {
   }
 
   get isDead(): boolean {
-    return this.deathTimer > 0
+    return this.dead
+  }
+
+  /**
+   * True once the body has settled, so the "continue" prompt is not thrown up
+   * on the same tick the cop is still falling over.
+   */
+  get isAwaitingContinue(): boolean {
+    return this.dead && this.deathTimer === 0
   }
 
   /** Flashes while briefly invulnerable, so a hit reads. */
@@ -287,9 +304,9 @@ export class Player extends Entity {
 
     if (this.invulnerable > 0) this.invulnerable--
 
-    // Dead: hold still and let the timer run the respawn.
-    if (this.deathTimer > 0) {
-      this.deathTimer--
+    // Dead: settle to the floor and wait to be told to carry on.
+    if (this.dead) {
+      if (this.deathTimer > 0) this.deathTimer--
       this.vx = 0
       this.vy = Math.min(this.vy + PHYSICS.gravity, PHYSICS.maxFall)
       moveAndCollide(this.level, this, 0, this.vy)
@@ -462,7 +479,7 @@ export class Player extends Entity {
    * death animation and the respawn timer.
    */
   hurt(amount: number): boolean {
-    if (this.invulnerable > 0 || this.deathTimer > 0) return false
+    if (this.invulnerable > 0 || this.dead) return false
     // `bottom_damage` refuses outright mid-teleport (lisp/people.lsp).
     if (this.isTeleporting) return false
     // Already down and waiting to respawn. Without this a turret that keeps
@@ -479,7 +496,8 @@ export class Player extends Entity {
     if (this.health > 0) return false
 
     if (this.assets.hasState(this.character, 'dead')) this.setState('dead', true)
-    this.deathTimer = DEATH_TICKS
+    this.dead = true
+    this.deathTimer = DEATH_SETTLE_TICKS
     return true
   }
 
@@ -491,6 +509,7 @@ export class Player extends Entity {
     this.health = this.assets.ability('DARNEL', 'start_hp') ?? BASE_HEALTH_CAP
     // Ammo survives a death; only the machine gun is topped back up.
     this.magazines[0] = Math.max(this.magazines[0], STARTING_AMMO)
+    this.dead = false
     this.deathTimer = 0
     this.invulnerable = HURT_INVULNERABLE
     // Dying on a pad would otherwise leave him permanently faded and unable to

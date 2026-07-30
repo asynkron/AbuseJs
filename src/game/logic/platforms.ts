@@ -1,3 +1,4 @@
+import { ticks } from '../enemies/tuning'
 import { Behaviour } from './behaviour'
 import type { LogicWorld } from './behaviour'
 import type { LogicObject } from './object'
@@ -105,8 +106,8 @@ export class Platform extends Behaviour {
    */
   private get speed(): number {
     const primary = this.self.data.xacel || DEFAULT_SPEED
-    if (this.self.aistate === 0) return primary
-    return this.self.data.yacel || primary
+    if (this.self.aistate === 0) return ticks(primary)
+    return ticks(this.self.data.yacel || primary)
   }
 
   /** Either the far endpoint signals, or a player stands on it and presses. */

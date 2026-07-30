@@ -1,3 +1,4 @@
+import { TICK_SCALE } from '../../enemies/tuning'
 import { BASE_HEALTH_CAP } from '../healing'
 import type { PowerEffect, PowerVisuals } from '../types'
 
@@ -16,11 +17,19 @@ import type { PowerEffect, PowerVisuals } from '../types'
  * defined as the same ramp the drawing uses.
  */
 
-/** `(if (<= used_special_power 15) ...)` - the ramp tops out at 16. */
-const RAMP_MAX = 16
+/**
+ * `if (o->lvars[used_special_power]<15) o->lvars[used_special_power]++`
+ * (src/cop.cpp:494) - one step per 15Hz tick, capped at 15. It is a rate, so
+ * here it climbs TICK_SCALE per 60Hz tick instead of a whole step: fading in
+ * took a quarter of a second rather than the original's second.
+ */
+const RAMP_MAX = 15
 
-/** `(if (> count 15) (draw_predator) ...)` - only the very top is the refraction. */
+/** `draw_predator` takes over at the top of the ramp (src/cop.cpp:889). */
 const PREDATOR_AT = RAMP_MAX
+
+/** The scale `draw_transparent count 16` divides by. */
+const TRANS_SCALE = 16
 
 export class SneakyPower implements PowerEffect {
   readonly kind = 'sneaky' as const
@@ -30,11 +39,11 @@ export class SneakyPower implements PowerEffect {
   private ramp = 0
 
   hold(): void {
-    if (this.ramp < RAMP_MAX) this.ramp++
+    if (this.ramp < RAMP_MAX) this.ramp = Math.min(RAMP_MAX, this.ramp + TICK_SCALE)
   }
 
   release(): void {
-    if (this.ramp > 0) this.ramp--
+    if (this.ramp > 0) this.ramp = Math.max(0, this.ramp - TICK_SCALE)
   }
 
   visuals(): PowerVisuals {
@@ -43,7 +52,7 @@ export class SneakyPower implements PowerEffect {
     // `(draw_transparent count 16)`: the argument is how much of the background
     // shows through, so the sprite's own alpha is what is left of it.
     return {
-      body: { mode: 'transparent', alpha: 1 - this.ramp / RAMP_MAX },
+      body: { mode: 'transparent', alpha: 1 - this.ramp / TRANS_SCALE },
       ghosts: [],
       hudImage: this.hudImage,
     }
