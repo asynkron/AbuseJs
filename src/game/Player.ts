@@ -14,7 +14,7 @@ import {
 } from './Ladders'
 import { BASE_HEALTH_CAP, drawsTorso, scaleDamage, type PowerVisuals } from './powers'
 import { atan2Deg, TORSO_FALLBACK, WEAPON_SLOTS, type WeaponSlot } from './weapons/index'
-import { isBlocked, isGrounded, moveAndCollide } from './collision'
+import { isBlocked, isGrounded, moveAndCollide, unstick } from './collision'
 import { accel, GRAVITY, MAX_FALL, speed, TICK_SCALE, ticks } from './enemies/tuning'
 
 /**
@@ -346,6 +346,12 @@ export class Player extends Entity {
   update(input: InputState, jumpPressed: boolean): void {
     this.prevX = this.x
     this.prevY = this.y
+
+    // Anything may have put him inside a wall since the last tick - a lift, a
+    // teleporter, a spring, the 28px ladder step - and a body inside a wall
+    // cannot move in any direction at all. This is the only thing that gets him
+    // out again.
+    unstick(this.level, this)
 
     if (this.climbDepth !== null && this.updateClimb(input)) return
 

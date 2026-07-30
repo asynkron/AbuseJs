@@ -1112,22 +1112,33 @@ export class World {
         continue
       }
 
-      const least = Math.min(pushRight, pushLeft, pushDown, pushUp)
+      // Shallowest axis first, but skip any that would put him inside tile
+      // geometry: a door closing beside a wall would otherwise shove him into
+      // the wall, and next tick `unstick` shoves him back into the door. He
+      // would oscillate instead of stepping clear of both.
+      const options = [
+        { depth: pushRight, dx: pushRight, dy: 0 },
+        { depth: pushLeft, dx: -pushLeft, dy: 0 },
+        { depth: pushUp, dx: 0, dy: -pushUp },
+        { depth: pushDown, dx: 0, dy: pushDown },
+      ].sort((a, b) => a.depth - b.depth)
 
-      if (least === pushRight) {
-        player.x += pushRight
-        player.vx = Math.max(0, player.vx)
-      } else if (least === pushLeft) {
-        player.x -= pushLeft
-        player.vx = Math.min(0, player.vx)
-      } else if (least === pushUp) {
-        player.y -= pushUp
+      const free = options.find(
+        (o) => !isBlocked(this.level, { ...player, x: player.x + o.dx, y: player.y + o.dy }),
+      )
+      const chosen = free ?? options[0]
+
+      player.x += chosen.dx
+      player.y += chosen.dy
+
+      if (chosen.dx > 0) player.vx = Math.max(0, player.vx)
+      else if (chosen.dx < 0) player.vx = Math.min(0, player.vx)
+      else if (chosen.dy < 0) {
         if (player.vy > 0) {
           player.vy = 0
           player.landOn(box.top)
         }
-      } else {
-        player.y += pushDown
+      } else if (chosen.dy > 0) {
         player.vy = Math.max(0, player.vy)
       }
     }

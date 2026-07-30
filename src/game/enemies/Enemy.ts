@@ -1,5 +1,6 @@
 import type { GameAssets } from '../../assets/loader'
 import type { LevelObjectData } from '../../assets/types'
+import { unstick } from '../collision'
 import { Prop } from '../Prop'
 import { TICK_SCALE } from './tuning'
 import type { EnemyContext, EnemyShot, EnemySound, PlayerView } from './types'
@@ -110,6 +111,11 @@ export abstract class Enemy extends Prop {
 
     if (this.isDead) return false
     if (this.isDying) return this.decay(player)
+
+    // Levels place creatures by hand and a SWITCH_MOVER drops them wherever it
+    // likes, so they can start or end up inside geometry - and a body inside
+    // geometry cannot move at all. See collision.ts `unstick`.
+    unstick(this.world.level, this)
 
     this.stateTime++
     if (!this.think(player)) this.finished = true

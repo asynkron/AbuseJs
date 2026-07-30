@@ -25,6 +25,13 @@ export interface CollisionResult {
 const STEP_HEIGHT = 8
 
 /**
+ * How far `unstick` will look for open space. Bounded so a body wedged in
+ * genuinely solid rock is left where it is rather than teleported across the
+ * room; a tile is 30x15, so this covers being a whole tile deep.
+ */
+const UNSTICK_LIMIT = 32
+
+/**
  * Movement is applied in steps no larger than this. Small steps mean a
  * collision can be resolved by simply undoing the step, with an error under a
  * couple of pixels, which keeps the solver simple enough to reason about on
@@ -121,6 +128,10 @@ function moveX(level: Level, body: Body, dx: number, result: CollisionResult): v
     body.y = previousY
   }
 
+  // Backing out is right even when the previous position was itself inside
+  // geometry: letting the move stand instead means an embedded body takes
+  // whatever the snap below computes, which from inside a wall can be most of a
+  // screen away. Getting *out* is `unstick`'s job, and it runs every tick.
   body.x = previousX
   result.hitWall = true
 }
@@ -140,9 +151,44 @@ function moveY(level: Level, body: Body, dy: number, result: CollisionResult): v
     result.hitCeiling = true
   }
 
-  // Snapping can land inside something else on a busy tile; undoing the step
-  // is always safe because the previous position was clear.
+  // Snapping can land inside something else on a busy tile, and from inside
+  // geometry it can land a long way off - so the step is undone whether or not
+  // the previous position was clear. `unstick` is what resolves being embedded.
   if (isBlocked(level, body)) body.y = previousY
+}
+
+/**
+ * Nudges a body out of solid geometry, if it has ended up inside some.
+ *
+ * Nothing in the original does this - `level::wall_push` is the closest thing
+ * and its only call site is commented out (src/level.cpp:760) - so this is ours,
+ * and it is here because a great many things place a body without testing
+ * anything first: `set_x`/`set_y` through a teleporter, a SWITCH_MOVER, a spring,
+ * boarding a lift, the 28px step on and off a ladder, and every level's own
+ * saved object positions. Any one of those can leave a body overlapping a wall,
+ * and a body inside a wall has nowhere to go.
+ *
+ * Searches the smallest displacement that frees it, upwards first - being
+ * pressed into a floor or a lift deck is the common case, and a small upward
+ * nudge is the one direction gravity will undo by itself.
+ */
+export function unstick(level: Level, body: Body): boolean {
+  if (!isBlocked(level, body)) return false
+
+  for (let shift = 1; shift <= UNSTICK_LIMIT; shift++) {
+    for (const [dx, dy] of [
+      [0, -shift],
+      [-shift, 0],
+      [shift, 0],
+      [0, shift],
+    ] as const) {
+      if (isBlocked(level, { ...body, x: body.x + dx, y: body.y + dy })) continue
+      body.x += dx
+      body.y += dy
+      return true
+    }
+  }
+  return false
 }
 
 /** True when solid ground sits directly under the body. */
