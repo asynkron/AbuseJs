@@ -1484,6 +1484,20 @@ export class World {
     for (const pad of this.teleporters) {
       const { hold, arrival } = pad.update()
 
+      // `(set_aistate 1)` when a pad takes hold of the player and `(set_aistate
+      // 0)` when it lets go (tp2_ai, lisp/duong.lsp:242 and :266).
+      //
+      // A pad is a signal source as much as a ride. Levels wire the pulse into
+      // a pair of OR gates cross-linked into a latch, so using a pad sets a bit
+      // that stays set - which is how level04 lights the lamp over each of its
+      // three teleporters once you have been through and come back. This pad is
+      // driven by the world rather than the logic subsystem, so nothing was
+      // publishing its aistate and the latch was never set: the lamps stayed
+      // red however thoroughly the far side was cleared.
+      if (pad.objectIndex >= 0) {
+        this.logic.setSignal(pad.objectIndex, pad.isCharging ? 1 : 0)
+      }
+
       // The pad owns the player for the length of its animation: pinned in
       // place, fading, and neither shooting nor able to be shot.
       if (hold) {

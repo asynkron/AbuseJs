@@ -154,6 +154,16 @@ export class LevelLogic implements LogicWorld {
     return this.signals.isOn(index)
   }
 
+  /**
+   * `(set_aistate n)` from outside the subsystem.
+   *
+   * For the objects the world drives itself but which the wiring still reads -
+   * a teleporter pad is one, and its pulse is what latches the lamp above it.
+   */
+  setSignal(index: number, value: number): void {
+    this.signals.setState(index, value)
+  }
+
   /** `(activated)` - see SignalNetwork. Force fields and bombs are gated on it. */
   isActivated(index: number): boolean {
     return this.signals.isActivated(index)
