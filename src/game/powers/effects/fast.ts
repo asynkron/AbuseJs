@@ -100,8 +100,10 @@ export class FastPower implements PowerEffect {
   }
 
   private ghost(at: Point, transparency: number, host: PowerHost): Ghost {
-    // `draw_fast` pins the ghost torso with the same offset as the live one but
-    // without top_draw's 2px nudge, so the trail sits square behind the legs.
+    // `(set_x l2x) (set_y (- (- l2y -29) h))` - the ghost torso takes the same
+    // `y + 29 - legs_height` anchor as the live one, but plain `l2x` with none
+    // of `top_draw`'s 4px shoulder shift, so the trail sits square behind the
+    // legs (lisp/people.lsp:405-417).
     const torso = drawsTorso(host.legState)
       ? { x: at.x, y: at.y + TORSO_BASELINE - host.legHeight }
       : null

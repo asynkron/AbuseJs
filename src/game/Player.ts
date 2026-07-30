@@ -883,7 +883,11 @@ export class Player extends Entity {
       pair.torso.visible = ghost.torso !== null && torsoFrame !== undefined
       if (ghost.torso && torsoFrame) {
         pair.torso.alpha = ghost.alpha
-        this.blit(pair.torso, torsoFrame, ghost.torso.x, ghost.torso.y + torsoFrame.height - 1)
+        // `ghost.torso.y` is already `legs.y + 29 - legs_height`, the same
+        // anchor the live torso uses, and `blit` applies the engine's own
+        // `y - height + 1` on top. Pre-adding the torso height here cancelled
+        // that out, so the ghost landed a full torso below the cop.
+        this.blit(pair.torso, torsoFrame, ghost.torso.x, ghost.torso.y, false)
       }
     })
 
@@ -903,10 +907,16 @@ export class Player extends Entity {
     return pair
   }
 
-  /** The engine's anchoring, mirrored the same way `Entity.draw` mirrors it. */
-  private blit(sprite: Sprite, frame: Frame, x: number, y: number): void {
+  /**
+   * The engine's anchoring, mirrored the same way `Entity.draw` mirrors it.
+   *
+   * `mirrored` is false for a torso: `top_ai` forces `o->direction=1`, so the
+   * ghost copies have to be drawn facing right whichever way the legs point,
+   * exactly like the live one.
+   */
+  private blit(sprite: Sprite, frame: Frame, x: number, y: number, mirrored = true): void {
     sprite.texture = frame.texture
-    if (this.direction >= 0) {
+    if (!mirrored || this.direction >= 0) {
       sprite.scale.x = 1
       sprite.x = Math.round(x - frame.xcfg)
     } else {
