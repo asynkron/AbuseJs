@@ -47,6 +47,12 @@ export interface MachineGunBullet extends Motion {
   angle: number
   speed: number
   lifetime: number
+  /**
+   * The exponent its 20%-per-original-tick speed ladder is raised to - the
+   * shooter's tick scale. The cop's rounds climb on his clock, a monster's on
+   * the world's.
+   */
+  readonly growth: number
   /** The trail anchor, refreshed at the top of every tick. */
   lastX: number
   lastY: number

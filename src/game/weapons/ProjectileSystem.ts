@@ -25,7 +25,7 @@ import { ascatterLine, drawLine, rgb, scatterLine } from './lines'
 import { PROJECTILE_TYPE, ROCKET_SEARCH_RADIUS, WEAPON_SLOTS } from './definitions'
 import { motion, PROJECTILE_CHARACTER } from './Projectile'
 import type { Projectile, ProjectileKind } from './Projectile'
-import { DIFFICULTY, speed, ticks } from '../enemies/tuning'
+import { DIFFICULTY, PLAYER_TICK_SCALE, speed, TICK_SCALE, ticks } from '../enemies/tuning'
 
 /**
  * Characters `def_char` never produced, so chars.json has no entry - the same
@@ -54,18 +54,25 @@ const BULLET_VARIANTS = {
   [PROJECTILE_TYPE.aiBullet]: {
     lifetime: ticks(6),
     speed: speed(15),
+    growth: TICK_SCALE,
     bright: rgb(255, 255, 200),
     medium: rgb(150, 150, 0),
   },
   [PROJECTILE_TYPE.slowBullet]: {
     lifetime: ticks(40),
     speed: speed(6),
+    growth: TICK_SCALE,
     bright: rgb(255, 128, 64),
     medium: rgb(255, 0, 0),
   },
+  // The cop's own round is hand-tuned with the rest of him: his figures are read
+  // as our ticks, so it leaves at 900px/s where a monster's identical round
+  // leaves at 225. Putting it on the world's clock made his fire read as slow
+  // motion while the monsters looked right.
   [PROJECTILE_TYPE.playerBullet]: {
-    lifetime: ticks(6),
-    speed: speed(15),
+    lifetime: 6,
+    speed: 15,
+    growth: PLAYER_TICK_SCALE,
     bright: rgb(255, 0, 0),
     medium: rgb(150, 0, 0),
   },
@@ -300,6 +307,7 @@ export class ProjectileSystem {
       angle: normalizeAngle(angle),
       speed: variant.speed,
       lifetime: variant.lifetime,
+      growth: variant.growth,
       lastX: x,
       lastY: y,
       bright: variant.bright,

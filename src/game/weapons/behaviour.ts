@@ -79,7 +79,7 @@ function tickMachineGun(bullet: MachineGunBullet, ctx: TickContext): void {
   // integer steps of 18, 21, 25, 30, 37, 44 covered. The truncation the lisp's
   // fixed point imposed is dropped with it: the ladder is no longer integral
   // in these units, and rounding it here would just lose range.
-  bullet.speed *= Math.pow(1.2, TICK_SCALE)
+  bullet.speed *= Math.pow(1.2, bullet.growth)
   const course = setCourse(bullet.angle, bullet.speed)
   bullet.vx = course.vx
   bullet.vy = course.vy

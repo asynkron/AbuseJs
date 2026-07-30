@@ -27,8 +27,38 @@
  */
 export const TICK_SCALE = 1 / 4
 
+/**
+ * The cop's own tempo, which is deliberately not the world's.
+ *
+ * Player.ts's movement is a hand-tuned rewrite rather than a port - it always
+ * has been - and this is the factor it was tuned at: 6.0px per 60Hz tick
+ * against DARNEL's `run_top_speed 9`. That makes him about 2.67x faster than
+ * the original's cop, and the game is built around that.
+ *
+ * It is also, historically, what TICK_SCALE itself used to be: the monsters
+ * were scaled to match this cop rather than the original. Putting the world on
+ * the original's clock is right, but the cop has to keep his, or he moves and
+ * shoots at a quarter of the speed the rest of the game expects of him.
+ *
+ * So: `speed`/`accel`/`ticks` are the world's, `playerSpeed`/`playerAccel`/
+ * `playerTicks` are his - his movement, his climb, his weapon cadence and his
+ * own rounds.
+ */
+export const PLAYER_TICK_SCALE = 2 / 3
+
 /** An original velocity (pixels per original tick) in pixels per our tick. */
 export const speed = (original: number): number => original * TICK_SCALE
+
+/** `speed`, on the cop's faster clock. */
+export const playerSpeed = (original: number): number => original * PLAYER_TICK_SCALE
+
+/** `accel`, on the cop's faster clock. */
+export const playerAccel = (original: number): number =>
+  original * PLAYER_TICK_SCALE * PLAYER_TICK_SCALE
+
+/** `ticks`, on the cop's faster clock - so his delays shorten with his speed. */
+export const playerTicks = (original: number): number =>
+  Math.max(1, Math.round(original / PLAYER_TICK_SCALE))
 
 /**
  * An original acceleration - anything the scripts add to a velocity once per

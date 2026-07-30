@@ -1,4 +1,4 @@
-import { speed } from './enemies/tuning'
+import { playerSpeed } from './enemies/tuning'
 import type { LevelObjectData } from '../assets/types'
 
 /**
@@ -23,7 +23,7 @@ import type { LevelObjectData } from '../assets/types'
  */
 
 /** Pixels per tick, up or down - `(set_y (+ (y) 3))` in climb_handler. */
-export const CLIMB_SPEED = speed(3)
+export const CLIMB_SPEED = playerSpeed(3)
 /** Within this of the top, pressing up steps off - `(if (< yd 32) ...)`. */
 export const CLIMB_OFF_RANGE = 32
 /** How far stepping off lifts the cop - `(set_y (- (y) 28))`. */
