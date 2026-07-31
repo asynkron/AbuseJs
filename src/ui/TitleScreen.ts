@@ -19,6 +19,8 @@ export interface TitleChoice {
   difficulty: Difficulty
   /** Whether to resume the save rather than start at the first level. */
   resume: boolean
+  /** Whether to generate a level instead of loading a shipped one. */
+  random: boolean
 }
 
 const DIFFICULTY_KEY = 'abusejs.difficulty'
@@ -44,10 +46,11 @@ export function showTitleScreen(options: { canResume: boolean; skip: boolean }):
   const root = document.getElementById('title')
   const newGame = document.getElementById('start-new') as HTMLButtonElement | null
   const loadGame = document.getElementById('start-load') as HTMLButtonElement | null
+  const randomGame = document.getElementById('start-random') as HTMLButtonElement | null
 
   let difficulty = storedDifficulty()
 
-  if (options.skip || !root || !newGame || !loadGame) {
+  if (options.skip || !root || !newGame || !loadGame || !randomGame) {
     // Take it out of the document rather than just leaving it be. It is
     // `position: fixed` at `z-index: 20`, and returning here means none of the
     // buttons below ever get a click handler - so a screen left standing sits
@@ -59,7 +62,7 @@ export function showTitleScreen(options: { canResume: boolean; skip: boolean }):
     // Skipping means a deep link, which is an explicit request for *that*
     // level - resuming would quietly send you somewhere else instead. Only a
     // real press of Load Saved Game resumes.
-    return Promise.resolve({ difficulty, resume: false })
+    return Promise.resolve({ difficulty, resume: false, random: false })
   }
 
   const buttons = [...root.querySelectorAll<HTMLButtonElement>('[data-difficulty]')]
@@ -75,7 +78,7 @@ export function showTitleScreen(options: { canResume: boolean; skip: boolean }):
   newGame.focus()
 
   return new Promise<TitleChoice>((resolve) => {
-    const finish = (resume: boolean) => {
+    const finish = (resume: boolean, random = false) => {
       try {
         localStorage.setItem(DIFFICULTY_KEY, difficulty)
       } catch {
@@ -86,11 +89,12 @@ export function showTitleScreen(options: { canResume: boolean; skip: boolean }):
       // Left in the DOM until the fade finishes, then taken out entirely so it
       // cannot eat clicks meant for the game.
       setTimeout(() => root.remove(), 450)
-      resolve({ difficulty, resume })
+      resolve({ difficulty, resume, random })
     }
 
     newGame.addEventListener('click', () => finish(false))
     loadGame.addEventListener('click', () => finish(true))
+    randomGame.addEventListener('click', () => finish(false, true))
     for (const button of buttons) {
       button.addEventListener('click', () => {
         difficulty = button.dataset.difficulty as Difficulty

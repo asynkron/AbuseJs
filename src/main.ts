@@ -7,6 +7,7 @@ import { GameLoop } from './core/loop'
 import { Input } from './core/input'
 import { Level } from './game/Level'
 import { World } from './game/World'
+import { loadGeneratedLevel, RANDOM_LEVEL_ID } from './game/random/generate'
 import { CrtFilter, crtGridPeriod, crtPixelScale } from './render/CrtFilter'
 import { setDifficulty } from './game/powers'
 import { showTitleScreen } from './ui/TitleScreen'
@@ -204,7 +205,8 @@ async function start() {
 
   // #levels/level03 in the URL picks a level; anything in levels.json works.
   const requested = decodeURIComponent(location.hash.replace(/^#/, '')) || DEFAULT_LEVEL
-  const levelId = assets.levels.some((l) => l.id === requested) ? requested : DEFAULT_LEVEL
+  const known = requested === RANDOM_LEVEL_ID || assets.levels.some((l) => l.id === requested)
+  const levelId = known ? requested : DEFAULT_LEVEL
 
   const soundManifest = (await fetch('assets/sounds.json').then((r) => r.json())) as SoundManifest
   const audio = new AudioBank(soundManifest)
@@ -258,8 +260,14 @@ async function start() {
    */
   const loadLevel = async (id: string) => {
     World.currentLevelId = id
-    say(`loading ${id}`)
-    const data = await assets.loadLevel(id)
+    say(id === RANDOM_LEVEL_ID ? 'generating a level' : `loading ${id}`)
+    // A generated level is built here rather than fetched. Everything past this
+    // point is handed the same `LevelData` shape either way, so nothing else in
+    // the game needs to know which kind it is holding.
+    const data =
+      id === RANDOM_LEVEL_ID
+        ? await loadGeneratedLevel((teacher) => assets.loadLevel(teacher), assets.tileSet('fore').tiles)
+        : await assets.loadLevel(id)
 
     if (world) {
       app.stage.removeChild(world.root, world.lights.overlay, world.blastGlow, world.hurtFlash, world.statusBar.container, world.messages.container)
@@ -372,7 +380,14 @@ async function start() {
     const requested = world.requestedLevel
     if (requested && !switching) {
       world.requestedLevel = null
-      if (assets.levels.some((l) => l.id === requested)) {
+      // A generated level has no next level to name, so its exit makes another
+      // one. Checked before the manifest, which will never contain this id.
+      if (currentLevelId === RANDOM_LEVEL_ID) {
+        switching = true
+        void loadLevel(RANDOM_LEVEL_ID).finally(() => {
+          switching = false
+        })
+      } else if (assets.levels.some((l) => l.id === requested)) {
         switching = true
         void loadLevel(requested).finally(() => {
           switching = false
@@ -463,6 +478,11 @@ async function start() {
     skip: deepLinked,
   })
   setDifficulty(choice.difficulty)
+
+  // Asked for a generated level: build one now, before the loop starts.
+  if (choice.random && currentLevelId !== RANDOM_LEVEL_ID) {
+    await loadLevel(RANDOM_LEVEL_ID)
+  }
 
   // Resuming means the level the save was taken in, not the one we booted
   // into. Without this you always started on level01 - and then the save's
