@@ -4,3 +4,7 @@ public/assets/
 src/lisp/generated/
 .DS_Store
 *.log
+
+# Sprite dumps from tools/export-sprites.ts - generated, and the art is
+# already in the repo as atlases.
+export/
