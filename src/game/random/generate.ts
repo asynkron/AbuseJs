@@ -17,20 +17,18 @@ export const RANDOM_LEVEL_ID = 'random/maze'
 /**
  * Which level teaches the tiles.
  *
- * Pick the level whose *structure* matches the maze, not the one that sounds
- * like it should. The first choice here was level01 on the reasoning that at
- * 82% solid it is full of "rock with an opening on this side" - but a maze of
- * rooms is 27% solid, the opposite thing, and the result was visual noise: in
- * level01 two neighbouring rock cells are the same tile nine times in ten,
- * while a maze taught by it managed only seven in ten.
+ * It has to match the *structure* being generated, and that is the loop this
+ * went round twice. Rooms-with-thin-walls came out 27% solid, so level01 at 82%
+ * taught it badly and the fix looked like changing teacher - to level05, 20%
+ * solid, which matched the numbers and produced thin platforms in open space.
+ * That is Donkey Kong, not Abuse.
  *
- * level05 is 20% solid, thin structures in open space, which is what a maze
- * actually is. Measured the honest way - how much a generated level varies
- * against how much its teacher varies - it lands at 31% against level05's own
- * 29.6%, so the output is as coherent as the source. level01 gave 28% against
- * its own 9.5%, three times too busy.
+ * The structure was the thing to change. maze.ts now cuts passages out of solid
+ * rock and lands near 70%, so the warren levels teach it properly and level01
+ * is back. Its own rock is the same tile nine times in ten, which is what makes
+ * a corridor read as cut through something rather than assembled from parts.
  */
-const TEACHER = 'levels/level05'
+const TEACHER = 'levels/level01'
 
 /**
  * Maze size in rooms: 73x49 tiles, or 2190x735 world pixels.
@@ -138,13 +136,38 @@ function backdrop(
   return out
 }
 
-/** Somewhere inside a room, in world pixels, standing on its floor. */
-function floorSpot(room: Room, random: () => number): { x: number; y: number } {
-  const tx = room.x + 1 + Math.floor(random() * (ROOM_W - 2))
+/**
+ * Somewhere inside a chamber with floor under it, in world pixels.
+ *
+ * The floor cannot be assumed: a shaft cuts straight down through it, so a
+ * column picked blind may be the hole. Putting the exit over one leaves it
+ * hanging in mid-air, and putting the start over one drops the player into the
+ * level below before they have touched a key.
+ */
+function floorSpot(
+  room: Room,
+  standable: (tx: number, ty: number) => boolean,
+  reachable: (tx: number, ty: number) => boolean,
+  random: () => number,
+): { x: number; y: number } {
+  // Every foothold in the chamber, preferring the ones the cop can get to.
+  const spots: { tx: number; ty: number }[] = []
+  const anywhere: { tx: number; ty: number }[] = []
+  for (let i = 0; i < ROOM_W; i++) {
+    for (let dy = ROOM_H - 1; dy >= 0; dy--) {
+      const tx = room.x + i
+      const ty = room.y + dy
+      if (!standable(tx, ty)) continue
+      anywhere.push({ tx, ty })
+      if (reachable(tx, ty)) spots.push({ tx, ty })
+    }
+  }
+  const pool = spots.length > 0 ? spots : anywhere
+  const at = pool.length > 0 ? pool[Math.floor(random() * pool.length)] : { tx: room.x + 1, ty: room.y + ROOM_H - 1 }
   return {
-    x: tx * TILE_W + TILE_W / 2,
-    // The floor is the wall row under the room, so its top is where feet go.
-    y: (room.y + ROOM_H) * TILE_H,
+    // Feet rest on top of the tile below the one being stood in.
+    x: at.tx * TILE_W + TILE_W / 2,
+    y: (at.ty + 1) * TILE_H,
   }
 }
 
@@ -209,16 +232,19 @@ export function generateLevel(options: GenerateOptions): LevelData {
   const bg = backdrop(options.teacherBg, bgW, bgH, random)
 
   // --- objects ----------------------------------------------------------
+  const standable = (tx: number, ty: number): boolean => !solidAt(tx, ty) && solidAt(tx, ty + 1)
+  const walkableAt = (tx: number, ty: number): boolean =>
+    tx >= 0 && ty >= 0 && tx < width && ty < height && maze.walkable[ty * width + tx] === 1
   const objects: LevelObjectData[] = []
   const blank = { direction: 1, hp: 0, aistate: 0, aitype: 0, xvel: 0, yvel: 0, xacel: 0, yacel: 0 }
   const place = (type: string, x: number, y: number, extra: Partial<LevelObjectData> = {}): void => {
     objects.push({ type, state: 'stopped', x, y, ...blank, ...extra })
   }
 
-  const startAt = floorSpot(maze.start, random)
+  const startAt = floorSpot(maze.start, standable, walkableAt, random)
   place('START', startAt.x, startAt.y)
 
-  const exitAt = floorSpot(maze.exit, random)
+  const exitAt = floorSpot(maze.exit, standable, walkableAt, random)
   // `next_level_ai` keeps the destination in aistate; main.ts sends an exit
   // taken in a generated level to a freshly generated one instead.
   place('NEXT_LEVEL', exitAt.x, exitAt.y, { aistate: 1 })
@@ -240,19 +266,19 @@ export function generateLevel(options: GenerateOptions): LevelData {
     if (room === maze.start) continue
 
     if (random() < ANT_CHANCE) {
-      const at = floorSpot(room, random)
+      const at = floorSpot(room, standable, walkableAt, random)
       place('ANT_ROOF', at.x, at.y, { aistate: ANT_GROUND_AISTATE })
     }
     if (random() < HEALTH_CHANCE) {
-      const at = floorSpot(room, random)
+      const at = floorSpot(room, standable, walkableAt, random)
       place('HEALTH', at.x, at.y)
     }
     if (random() < AMMO_CHANCE) {
-      const at = floorSpot(room, random)
+      const at = floorSpot(room, standable, walkableAt, random)
       place('MBULLET_ICON20', at.x, at.y)
     }
     if (random() < GRENADE_CHANCE) {
-      const at = floorSpot(room, random)
+      const at = floorSpot(room, standable, walkableAt, random)
       place('GRENADE_ICON10', at.x, at.y)
     }
   }
