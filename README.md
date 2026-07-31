@@ -40,6 +40,28 @@ It starts on `levels/level01`, not level00: **level00 is Abuse's training level 
 monsters at all**, so starting there makes a game with working enemies look completely inert.
 `#levels/level00` still loads the tutorial.
 
+## Sprite viewer
+
+`viewer.html` — a second page, alongside the game, for watching the art animate on its own. Pick a
+character and an animation and it plays; the speed, the zoom and which way he faces are all
+adjustable, arrow keys step frame by frame, and each frame reports its size, its `x_center` and how
+far it advances the character.
+
+Its real subject is the cop, who is not one character but two: legs from `art/cop.spe` carrying every
+animation, and a torso from `art/coptop.spe` with 24 aim frames sweeping the circle. Put a torso on
+and it tracks the mouse exactly as it does in the game. The join between the halves — the baseline,
+the shoulder that shifts 4px when he turns, the torso that is never mirrored however the legs face —
+is imported from `src/game/copRig.ts` rather than reimplemented, so the viewer cannot quietly
+disagree with the game about it. All three of those have been bugs, and none of them is visible in a
+still frame.
+
+It reads the same packed atlas the game loads, so it needs no build step of its own and cannot show
+something the game does not have.
+
+For the frames as files rather than as animation, `npm run export:sprites` writes one PNG each, plus
+a `frames.json` carrying the `x_center` and `advance` that placing them needs. `--sheet` adds a
+contact sheet of the lot.
+
 ## Layout
 
 ```
@@ -55,6 +77,7 @@ src/
   core/              fixed-timestep loop, input, follow camera
   render/            pooled, culled tile layers + the CRT filter
   game/              level, collision, entities, player, world
+  viewer/            the sprite viewer behind viewer.html
 ```
 
 ## Asset pipeline

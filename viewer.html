@@ -1,0 +1,140 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>abuse.js &mdash; sprite viewer</title>
+    <style>
+      html, body {
+        margin: 0;
+        padding: 0;
+        min-height: 100%;
+        background: #05060a;
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        color: #9aa;
+        font-size: 12px;
+      }
+      #app {
+        display: grid;
+        grid-template-columns: 240px 1fr;
+        min-height: 100vh;
+      }
+      #side {
+        border-right: 1px solid rgba(120, 150, 175, 0.22);
+        padding: 14px;
+        display: grid;
+        align-content: start;
+        gap: 14px;
+        background: rgba(6, 10, 16, 0.72);
+      }
+      #stage {
+        display: grid;
+        place-items: center;
+        position: relative;
+      }
+      h1 {
+        margin: 0;
+        font-size: 13px;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+        color: #cfe0ec;
+      }
+      .group { display: grid; gap: 5px; }
+      label { letter-spacing: 0.06em; text-transform: uppercase; color: #7e8fa0; }
+      select, input[type='range'] { width: 100%; }
+      select {
+        background: #0a0c12;
+        color: #b9c4cf;
+        border: 1px solid rgba(120, 150, 175, 0.22);
+        border-radius: 3px;
+        font: inherit;
+        padding: 4px;
+      }
+      select[multiple] { height: 250px; }
+      .row {
+        display: grid;
+        grid-template-columns: 1fr auto;
+        align-items: center;
+        gap: 8px;
+      }
+      .val { color: #9fb4c6; font-variant-numeric: tabular-nums; }
+      button {
+        font: inherit;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+        color: #7e8fa0;
+        padding: 5px 0;
+        background: rgba(140, 170, 195, 0.1);
+        border: 1px solid rgba(120, 150, 175, 0.22);
+        border-radius: 3px;
+        cursor: pointer;
+      }
+      button:hover { color: #cfe0ec; background: rgba(140, 170, 195, 0.2); }
+      button[aria-pressed='true'] {
+        background: #f0662a33;
+        border-color: #f0662abb;
+        color: #ffd9c2;
+      }
+      .pair { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+      canvas { image-rendering: pixelated; }
+      #info {
+        position: absolute;
+        left: 14px;
+        top: 12px;
+        white-space: pre;
+        color: #6f7f8f;
+        line-height: 1.5;
+        pointer-events: none;
+      }
+      #error { padding: 20px; color: #f0662a; }
+    </style>
+  </head>
+  <body>
+    <div id="app">
+      <div id="side">
+        <h1>Sprite viewer</h1>
+
+        <div class="group">
+          <label for="character">Character</label>
+          <select id="character"></select>
+        </div>
+
+        <div class="group">
+          <label for="state">Animation</label>
+          <select id="state" size="14"></select>
+        </div>
+
+        <div class="group">
+          <label for="weapon">Torso on top</label>
+          <select id="weapon"></select>
+        </div>
+
+        <div class="group">
+          <div class="row"><label for="fps">Speed</label><span class="val" id="fps-val">15</span></div>
+          <input id="fps" type="range" min="1" max="60" step="1" value="15" />
+        </div>
+
+        <div class="group">
+          <div class="row"><label for="zoom">Zoom</label><span class="val" id="zoom-val">6&times;</span></div>
+          <input id="zoom" type="range" min="1" max="12" step="1" value="6" />
+        </div>
+
+        <div class="pair">
+          <button id="play" type="button">Pause</button>
+          <button id="facing" type="button">Face left</button>
+        </div>
+        <div class="pair">
+          <button id="prev" type="button">Prev</button>
+          <button id="next" type="button">Next</button>
+        </div>
+        <button id="anchor" type="button" aria-pressed="true">Anchor marks</button>
+      </div>
+
+      <div id="stage">
+        <canvas id="canvas"></canvas>
+        <div id="info"></div>
+      </div>
+    </div>
+    <script type="module" src="/src/viewer/main.ts"></script>
+  </body>
+</html>

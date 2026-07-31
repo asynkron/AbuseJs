@@ -15,6 +15,16 @@ import {
 import { BASE_HEALTH_CAP, drawsTorso, scaleDamage, type PowerVisuals } from './powers'
 import { atan2Deg, TORSO_FALLBACK, WEAPON_SLOTS, type WeaponSlot } from './weapons/index'
 import { isBlocked, isGrounded, moveAndCollide, unstick } from './collision'
+import {
+  aimFrameForAngle,
+  AIM_FRAME_ANGLES,
+  AIM_PIVOT_X,
+  AIM_PIVOT_Y,
+  MUZZLE_OFFSETS,
+  TOP_BASELINE,
+  TOP_CHARACTER,
+  TOP_SHOULDER_NUDGE,
+} from './copRig'
 import { playerAccel, playerSpeed, playerTicks, PLAYER_TICK_SCALE } from './enemies/tuning'
 
 /**
@@ -61,69 +71,12 @@ const RUN_CYCLE = 1 / 7
 const IDLE_FPS = 8
 
 /**
- * The cop is drawn as two halves: legs from art/cop.spe and a torso from
- * art/coptop.spe that rotates independently through 24 aim frames. The engine
- * pins the torso at `bottom.y + 29 - bottomHeight` and always draws it
- * unmirrored (src/cop.cpp, top_draw).
- */
-const TOP_CHARACTER = 'MGUN_TOP'
-const TOP_BASELINE = 29
-
-/**
- * The shoulder the gun hangs off is 4px further along when the cop faces left.
- *
- * Two separate functions apply it and both restore it afterwards, which makes
- * them easy to mistake for each other: `top_ai` shifts the *legs'* x across the
- * aim maths and puts it back before `o->x=q->x` (src/cop.cpp:155 and :186), so
- * that one really is angles only. `top_draw` then shifts the *torso's* own x
- * across the draw (src/cop.cpp:762-764), so it applies to the sprite as well.
- * Reading only the first leaves the torso 4px to the left of the legs whenever
- * he faces that way.
- */
-const TOP_SHOULDER_NUDGE = 4
-
-/**
  * The scale `SET_FADE_COUNT` works on - `(draw_transparent count 16)`, where
  * the count is how much of the background shows through. A teleporter ramps it
  * from 0 to 15 across its animation, so the cop thins out to almost nothing
  * before he is set down at the far end (tp2_ai, lisp/duong.lsp).
  */
 const TELEPORT_FADE_MAX = 16
-
-/**
- * Where the gun's muzzle sits for each of the torso's 24 aim frames, as
- * (x, right) / (y, up) offsets from the player's anchor.
- *
- * Straight from `small_fire_off` in src/cop.cpp - "x & y offset from character
- * to end of gun". Without it, shots leave from the player's feet instead of
- * the barrel.
- */
-const MUZZLE_OFFSETS: readonly (readonly [number, number])[] = [
-  [17, 20], [17, 23], [17, 28], [15, 33], [11, 39], [7, 43],
-  [-3, 44], [-10, 42], [-16, 39], [-20, 34], [-20, 28], [-20, 25],
-  [-19, 20], [-19, 16], [-16, 14], [-14, 11], [-11, 9], [-7, 8],
-  [-3, 8], [2, 8], [6, 9], [10, 10], [14, 13], [16, 15],
-]
-
-/**
- * The pivot the aim frames are measured from - `int iy=f[1], ix=f[6*2]` in
- * src/cop.cpp:163, which is frame 0's y and frame *6*'s x. Not a centre, just
- * the two numbers the original happens to pick.
- */
-const AIM_PIVOT_X = MUZZLE_OFFSETS[6][0]
-const AIM_PIVOT_Y = MUZZLE_OFFSETS[0][1]
-
-/**
- * The heading each aim frame inherently points, from its own muzzle offset.
- *
- * This is what makes the frame choice non-uniform: the 24 offsets are not
- * evenly spaced around the pivot, so dividing the aim angle by 24 picks a
- * different frame than the original's nearest-angle search does over most of
- * the circle (src/cop.cpp:166-176).
- */
-const AIM_FRAME_ANGLES: readonly number[] = MUZZLE_OFFSETS.map(([x, y]) =>
-  atan2Deg(y - AIM_PIVOT_Y, x - AIM_PIVOT_X),
-)
 
 /**
  * `abs(q->y - fb[1] - pointer_y) < 45 && abs(pointer_x - q->x + fb[0]) < 40`
@@ -133,16 +86,6 @@ const AIM_FRAME_ANGLES: readonly number[] = MUZZLE_OFFSETS.map(([x, y]) =>
  */
 const AIM_SNAP_Y = 45
 const AIM_SNAP_X = 40
-
-/**
- * `angle_diff` from src/cop.cpp:126 - the shortest way round between two
- * headings, 0..180. Not the same function as the `angleDiff` in
- * weapons/angles.ts, which reproduces the frisbee's deliberately broken one.
- */
-function shortestArc(a: number, b: number): number {
-  const d = Math.abs(a - b) % 360
-  return d > 180 ? 360 - d : d
-}
 
 /** A weapon swap costs a beat, so cycling is not a free rate-of-fire boost. */
 const WEAPON_SWITCH_DELAY = 8
@@ -314,15 +257,7 @@ export class Player extends Entity {
     const wanted = atan2Deg(this.y - AIM_PIVOT_Y - worldY, worldX - originX - AIM_PIVOT_X)
 
     // Pick the frame whose own heading is closest to that.
-    let best = 0
-    let bestDiff = Infinity
-    for (let i = 0; i < AIM_FRAME_ANGLES.length; i++) {
-      const diff = shortestArc(AIM_FRAME_ANGLES[i], wanted)
-      if (diff < bestDiff) {
-        bestDiff = diff
-        best = i
-      }
-    }
+    const best = aimFrameForAngle(wanted)
     this.aimFrame = best
 
     const [offX, offY] = MUZZLE_OFFSETS[best]
