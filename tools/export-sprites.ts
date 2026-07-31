@@ -1,7 +1,7 @@
 /**
  * Cuts the cop's frames back out of the packed atlas, one PNG each.
  *
- *   npx tsx tools/export-sprites.ts [--tints] [--out DIR]
+ *   npx tsx tools/export-sprites.ts [--tints] [--sheet] [--out DIR]
  *
  * The build packs every character into two atlas pages and records where each
  * frame landed (tools/convert.ts). This walks that record backwards: for each
@@ -32,12 +32,20 @@ const TOPS = ['MGUN_TOP', 'GRENADE_TOP', 'ROCKET_TOP', 'FIREBOMB_TOP', 'PGUN_TOP
 interface Options {
   readonly out: string
   readonly tints: boolean
+  readonly sheet: boolean
 }
 
 function parseArgs(argv: readonly string[]): Options {
   const out = argv.includes('--out') ? argv[argv.indexOf('--out') + 1] : 'export/player'
-  return { out: path.resolve(out), tints: argv.includes('--tints') }
+  return {
+    out: path.resolve(out),
+    tints: argv.includes('--tints'),
+    sheet: argv.includes('--sheet'),
+  }
 }
+
+/** Whole-pixel zoom for the contact sheet. Nearest neighbour, so it stays pixel art. */
+const SHEET_ZOOM = 3
 
 /** What one exported frame was, so the set can be put back together. */
 interface FrameRecord {
@@ -57,6 +65,59 @@ interface FrameRecord {
   xcenter: number
   /** Pixels the character is moved when this frame plays. Usually 0. */
   advance: number
+}
+
+/**
+ * A contact sheet, one row per state, at a single scale.
+ *
+ * Scaling each frame to fill a fixed box - the obvious way, and the first one
+ * tried - is actively misleading: Abuse crops every frame tight to its own
+ * pixels, so a climbing pose is 19x42 where a running one is 24x29, and fitting
+ * both to the same square scales them differently. They come out looking
+ * stretched against each other when nothing is wrong with them.
+ *
+ * So everything gets the same whole-pixel zoom, and frames are laid out on the
+ * anchor the engine uses rather than on their own edges: `x_center` on a common
+ * column, feet on a common baseline. Lined up that way a walk cycle reads as a
+ * walk cycle instead of as a row of jittering cut-outs.
+ */
+async function contactSheet(
+  out: string,
+  rows: readonly { label: string; frames: readonly FrameRecord[] }[],
+): Promise<void> {
+  const zoom = SHEET_ZOOM
+  const cellW = Math.max(...rows.flatMap((r) => r.frames.map((f) => f.width))) * zoom + 8
+  const cellH = Math.max(...rows.flatMap((r) => r.frames.map((f) => f.height))) * zoom + 8
+  const columns = Math.max(...rows.map((r) => r.frames.length))
+  const width = columns * cellW
+  const height = rows.length * cellH
+
+  const composites: sharp.OverlayOptions[] = []
+  for (let r = 0; r < rows.length; r++) {
+    for (let c = 0; c < rows[r].frames.length; c++) {
+      const frame = rows[r].frames[c]
+      const scaled = await sharp(path.join(out, frame.file))
+        .resize({ width: frame.width * zoom, height: frame.height * zoom, kernel: 'nearest' })
+        .png()
+        .toBuffer()
+      composites.push({
+        input: scaled,
+        // The anchor sits a third of the way across the cell and on its floor,
+        // which is where the engine would have put it.
+        left: Math.round(c * cellW + cellW / 3 - frame.xcenter * zoom),
+        top: Math.round((r + 1) * cellH - 4 - frame.height * zoom),
+      })
+    }
+  }
+
+  const file = path.join(out, '_contact-sheet.png')
+  await sharp({
+    create: { width, height, channels: 4, background: { r: 24, g: 26, b: 32, alpha: 1 } },
+  })
+    .composite(composites)
+    .png()
+    .toFile(file)
+  console.log(`contact sheet ${width}x${height} -> ${path.relative(process.cwd(), file)}`)
 }
 
 async function main(): Promise<void> {
@@ -145,6 +206,21 @@ async function main(): Promise<void> {
     path.join(options.out, 'frames.json'),
     `${JSON.stringify({ frames: records }, null, 2)}\n`,
   )
+
+  if (options.sheet) {
+    const byRow = new Map<string, FrameRecord[]>()
+    for (const record of records) {
+      // `DARNEL/running/00_x.png` -> `DARNEL/running`
+      const key = path.dirname(record.file)
+      const list = byRow.get(key)
+      if (list) list.push(record)
+      else byRow.set(key, [record])
+    }
+    await contactSheet(
+      options.out,
+      [...byRow].map(([label, frames]) => ({ label, frames })),
+    )
+  }
 
   console.log(`${written} PNGs -> ${options.out}`)
   console.log(`  ${BOTTOM}: legs, every animation state`)
