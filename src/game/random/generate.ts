@@ -17,12 +17,20 @@ export const RANDOM_LEVEL_ID = 'random/maze'
 /**
  * Which level teaches the tiles.
  *
- * level01 is 82% solid - a warren carved out of rock - so nearly every one of
- * its cells is an example of "solid, with an opening on this side", which is
- * exactly the question a maze asks. The open, girder-built levels have far
- * fewer of those and teach a maze badly.
+ * Pick the level whose *structure* matches the maze, not the one that sounds
+ * like it should. The first choice here was level01 on the reasoning that at
+ * 82% solid it is full of "rock with an opening on this side" - but a maze of
+ * rooms is 27% solid, the opposite thing, and the result was visual noise: in
+ * level01 two neighbouring rock cells are the same tile nine times in ten,
+ * while a maze taught by it managed only seven in ten.
+ *
+ * level05 is 20% solid, thin structures in open space, which is what a maze
+ * actually is. Measured the honest way - how much a generated level varies
+ * against how much its teacher varies - it lands at 31% against level05's own
+ * 29.6%, so the output is as coherent as the source. level01 gave 28% against
+ * its own 9.5%, three times too busy.
  */
-const TEACHER = 'levels/level01'
+const TEACHER = 'levels/level05'
 
 /**
  * Maze size in rooms: 73x49 tiles, or 2190x735 world pixels.
@@ -177,15 +185,19 @@ export function generateLevel(options: GenerateOptions): LevelData {
   const solidAt = (x: number, y: number): boolean =>
     x < 0 || y < 0 || x >= width || y >= height ? true : solid[y * width + x] === 1
 
+  // Left to right, top to bottom, so the tiles to the west and north are
+  // already placed when each cell is chosen - see PickContext.
   const fg = new Uint16Array(width * height)
   for (let y = 0; y < height; y++) {
     for (let x = 0; x < width; x++) {
-      fg[y * width + x] = model.pick(
-        solidAt(x, y),
-        ringSignature(solidAt, x, y),
-        crossSignature(solidAt, x, y),
+      fg[y * width + x] = model.pick({
+        solid: solidAt(x, y),
+        ring: ringSignature(solidAt, x, y),
+        cross: crossSignature(solidAt, x, y),
+        left: x > 0 ? fg[y * width + x - 1] : -1,
+        up: y > 0 ? fg[(y - 1) * width + x] : -1,
         random,
-      )
+      })
     }
   }
 

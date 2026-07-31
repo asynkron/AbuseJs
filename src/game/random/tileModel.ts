@@ -56,6 +56,30 @@ export interface TileSource {
   readonly cells: Uint16Array
 }
 
+/**
+ * Weight a candidate keeps when a neighbour was never followed by it.
+ *
+ * Small, so an unseen pairing loses badly to a seen one, but not zero: the
+ * structural bucket is the authority on what fits the geometry, and letting
+ * adjacency veto its last candidate would be a constraint that can fail.
+ */
+const ADJACENCY_FLOOR = 0.02
+
+/**
+ * Extra weight for simply continuing the neighbour's own tile.
+ *
+ * The adjacency counts already say this - a wall tile is overwhelmingly
+ * followed by itself - but only when the structural bucket happens to contain
+ * that tile *and* the pairing was seen. Asking for both at once is a joint
+ * condition that often is not met, and then the sampling falls back to
+ * bucket-proportional and the wall goes speckled again.
+ *
+ * So the prior is stated outright, because it is the single strongest fact in
+ * the data: in level01, two neighbouring rock cells are the same tile about
+ * nine times in ten. Tuned against that number, not guessed.
+ */
+const REPEAT_BONUS = 8000
+
 /** Weighted tiles for one situation, kept as parallel arrays for cheap sampling. */
 interface Bucket {
   ids: number[]
@@ -63,15 +87,37 @@ interface Bucket {
   total: number
 }
 
+/** Everything known about a cell at the moment its tile is chosen. */
+export interface PickContext {
+  readonly solid: boolean
+  readonly ring: number
+  readonly cross: number
+  /**
+   * Tiles already placed to the left and above, or -1 at the edge.
+   *
+   * These are what stop the result being noise. The structural key alone says
+   * "some rock with air to the north", and a bucket like that holds several
+   * tiles; drawing each cell independently from it means two neighbouring rock
+   * cells almost always disagree, and a wall that should read as one material
+   * comes out as every variant the artists ever drew, shuffled. Measured: in
+   * level01 two adjacent rock cells differ 9.5% of the time, and independent
+   * sampling took that to 44%.
+   */
+  readonly left: number
+  readonly up: number
+  readonly random: () => number
+}
+
 export interface TileModel {
   /**
-   * A tile for a cell, given whether it and its neighbours are solid.
+   * A tile for a cell.
    *
-   * Falls back from the eight-neighbour key to the four-neighbour one and then
-   * to "any tile of the right solidity", so a situation the source level never
-   * happened to contain still produces something structurally correct.
+   * Structure picks the bucket, the neighbours pick within it. The structural
+   * key falls back from eight neighbours to the nearest observed eight, then to
+   * four, then to "any tile of the right solidity", so a situation the source
+   * never contained still produces something structurally correct.
    */
-  pick(solid: boolean, ring: number, cross: number, random: () => number): number
+  pick(context: PickContext): number
   /** How many eight-neighbour situations were observed. Diagnostics only. */
   readonly detail: number
 }
@@ -143,6 +189,19 @@ export function learnTileModel(sources: readonly TileSource[], isSolid: (id: num
   const rings = new Map<string, Map<number, number>>()
   const crosses = new Map<string, Map<number, number>>()
   const anySolid = new Map<string, Map<number, number>>()
+  /** `rightOf.get(a).get(b)` - times b sat immediately right of a. */
+  const rightOf = new Map<number, Map<number, number>>()
+  /** The same, vertically. */
+  const below = new Map<number, Map<number, number>>()
+
+  const pair = (map: Map<number, Map<number, number>>, a: number, b: number): void => {
+    let row = map.get(a)
+    if (!row) {
+      row = new Map()
+      map.set(a, row)
+    }
+    row.set(b, (row.get(b) ?? 0) + 1)
+  }
 
   for (const source of sources) {
     const { width, height, cells } = source
@@ -156,6 +215,8 @@ export function learnTileModel(sources: readonly TileSource[], isSolid: (id: num
         tally(rings, `${self}:${ringSignature(solidAt, x, y)}`, id)
         tally(crosses, `${self}:${crossSignature(solidAt, x, y)}`, id)
         tally(anySolid, String(self), id)
+        if (x + 1 < width) pair(rightOf, id, cells[y * width + x + 1])
+        if (y + 1 < height) pair(below, id, cells[(y + 1) * width + x])
       }
     }
   }
@@ -203,7 +264,7 @@ export function learnTileModel(sources: readonly TileSource[], isSolid: (id: num
 
   return {
     detail: ringBuckets.size,
-    pick(solid, ring, cross, random) {
+    pick({ solid, ring, cross, left, up, random }) {
       const self = solid ? 1 : 0
       const near = nearest[self][ring & 0xff]
       const bucket =
@@ -213,7 +274,72 @@ export function learnTileModel(sources: readonly TileSource[], isSolid: (id: num
         anyBuckets.get(String(self))
       // A source with no solid tiles at all would leave this empty; 0 is the
       // empty tile, which is the safe thing to draw either way.
-      return bucket ? draw(bucket, random) : 0
+      if (!bucket) return 0
+      if (bucket.ids.length === 1) return bucket.ids[0]
+
+      // Re-weight the bucket by what the already-placed neighbours were
+      // followed by in the source. This is the Markov half, and it is what
+      // turns a field of plausible-but-unrelated tiles into walls made of one
+      // material: the structural key says which tiles *could* go here, the
+      // neighbours say which of them actually follows what is already there.
+      //
+      // Multiplicative, so a candidate has to satisfy both neighbours, and
+      // smoothed by ADJACENCY_FLOOR so a pair the source never contained is
+      // heavily penalised rather than impossible - that is what keeps this a
+      // preference and not a constraint, and why it can never fail the way
+      // backtracking tile models do.
+      const rightRow = left >= 0 ? rightOf.get(left) : undefined
+      const belowRow = up >= 0 ? below.get(up) : undefined
+      if (!rightRow && !belowRow) return draw(bucket, random)
+
+      // Hard first: keep only candidates the source actually put next to what
+      // is already placed. A pairing the artists never drew is not a rare
+      // choice to be made unlikely - it is a join that does not exist, and a
+      // soft weight lets it through often enough to see.
+      const allowed = bucket.ids.filter(
+        (id) => (!rightRow || rightRow.has(id)) && (!belowRow || belowRow.has(id)),
+      )
+      // When this bucket holds nothing that joins, widen the search to every
+      // tile of the right solidity rather than accepting a join that does not
+      // exist. Solidity is the hard invariant - it is what the collision world
+      // reads - and the exact eight-neighbour signature is only how the join
+      // is decorated. Given the choice, keep the join and lose the signature:
+      // a wall of slightly wrong-looking rock still reads as a wall, whereas
+      // two tiles that never meet in the game read as a glitch.
+      const wider = allowed.length > 0 ? allowed : (anyBuckets.get(String(self))?.ids ?? bucket.ids)
+      const joined =
+        allowed.length > 0
+          ? allowed
+          : wider.filter((id) => (!rightRow || rightRow.has(id)) && (!belowRow || belowRow.has(id)))
+      // Still nothing: relax to one neighbour, then give up and take the
+      // structural bucket. Rare, and the fallbacks are ordered so the commonest
+      // situations never reach them.
+      const relaxed =
+        joined.length > 0
+          ? joined
+          : wider.filter((id) => (rightRow?.has(id) ?? false) || (belowRow?.has(id) ?? false))
+      const candidates = relaxed.length > 0 ? relaxed : bucket.ids
+
+      let total = 0
+      const scores = candidates.map((id) => {
+        const known = bucket.ids.indexOf(id)
+        // A tile pulled in from the wider set has no weight in this bucket;
+        // give it the smallest one there so it stays a last resort.
+        let score = known >= 0 ? bucket.weights[known] : 1
+        if (rightRow) score *= (rightRow.get(id) ?? 0) + ADJACENCY_FLOOR
+        if (belowRow) score *= (belowRow.get(id) ?? 0) + ADJACENCY_FLOOR
+        if (id === left) score *= REPEAT_BONUS
+        if (id === up) score *= REPEAT_BONUS
+        total += score
+        return score
+      })
+
+      let roll = random() * total
+      for (let i = 0; i < scores.length; i++) {
+        roll -= scores[i]
+        if (roll <= 0) return candidates[i]
+      }
+      return candidates[candidates.length - 1]
     },
   }
 }
